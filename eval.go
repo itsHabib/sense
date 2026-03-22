@@ -10,13 +10,12 @@ import (
 
 // EvalResult is the structured result of an evaluation.
 type EvalResult struct {
-	Pass         bool          `json:"pass"`
-	Score        float64       `json:"score"`
-	Checks       []Check       `json:"checks"`
-	Duration     time.Duration `json:"-"`
-	TokensUsed   int           `json:"-"`
-	Model        string        `json:"-"`
-	CacheHit     bool          `json:"-"`
+	Pass       bool          `json:"pass"`
+	Score      float64       `json:"score"`
+	Checks     []Check       `json:"checks"`
+	Duration   time.Duration `json:"-"`
+	TokensUsed int           `json:"-"`
+	Model      string        `json:"-"`
 }
 
 // Check is a single expectation evaluation.
@@ -50,13 +49,13 @@ func (r *EvalResult) PassedChecks() []Check {
 	return passed
 }
 
-// FormatResult returns a human-readable summary of the evaluation.
-func (r *EvalResult) FormatResult() string {
+// String returns a human-readable summary of the evaluation.
+func (r *EvalResult) String() string {
 	passed := len(r.PassedChecks())
 	total := len(r.Checks)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "agent assertion failed (%d/%d passed, score: %.2f)\n", passed, total, r.Score)
+	fmt.Fprintf(&b, "evaluation: %d/%d passed, score: %.2f\n", passed, total, r.Score)
 
 	for _, c := range r.Checks {
 		if c.Pass {
@@ -112,29 +111,27 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 	}
 
 	if shouldSkip() {
-		return &EvalResult{
-			Pass:  true,
-			Score: 1.0,
-			Checks: func() []Check {
-				checks := make([]Check, len(b.expectations))
-				for i, exp := range b.expectations {
-					checks[i] = Check{Expect: exp, Pass: true, Confidence: 1.0, Reason: "skipped (SENSE_SKIP=1)"}
-				}
-				return checks
-			}(),
-		}, nil
+		checks := make([]Check, len(b.expectations))
+		for i, exp := range b.expectations {
+			checks[i] = Check{Expect: exp, Pass: true, Confidence: 1.0, Reason: "skipped (SENSE_SKIP=1)"}
+		}
+		return &EvalResult{Pass: true, Score: 1.0, Checks: checks}, nil
 	}
 
 	outputStr := serializeOutput(b.output)
 	userMsg := buildEvalUserMessage(outputStr, b.expectations, b.context)
 
-	ctx, cancel := context.WithTimeout(ctx, globalConfig.Timeout)
-	defer cancel()
+	timeout := getTimeout()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 
 	start := time.Now()
 
 	client := getClient()
-	raw, usage, err := client.call(ctx, callRequest{
+	raw, usage, err := client.call(ctx, &callRequest{
 		systemPrompt: evalSystemPrompt,
 		userMessage:  userMsg,
 		toolName:     "submit_evaluation",
@@ -147,7 +144,7 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 
 	var result EvalResult
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, &Error{Op: "eval", Message: "failed to parse evaluation result", Err: err}
+		return nil, &Error{Op: "eval", Message: "failed to parse result", Err: err}
 	}
 
 	result.Duration = time.Since(start)

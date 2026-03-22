@@ -3,18 +3,21 @@ package sense
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
 // CompareResult is the result of an A/B comparison.
 type CompareResult struct {
-	Winner    string            `json:"winner"`
-	ScoreA    float64           `json:"score_a"`
-	ScoreB    float64           `json:"score_b"`
-	Criteria  []CriterionResult `json:"criteria"`
-	Reasoning string            `json:"reasoning"`
-	Duration  time.Duration     `json:"-"`
+	Winner     string            `json:"winner"`
+	ScoreA     float64           `json:"score_a"`
+	ScoreB     float64           `json:"score_b"`
+	Criteria   []CriterionResult `json:"criteria"`
+	Reasoning  string            `json:"reasoning"`
+	Duration   time.Duration     `json:"-"`
+	TokensUsed int               `json:"-"`
+	Model      string            `json:"-"`
 }
 
 // CriterionResult is the result for a single comparison criterion.
@@ -24,6 +27,19 @@ type CriterionResult struct {
 	ScoreB float64 `json:"score_b"`
 	Winner string  `json:"winner"`
 	Reason string  `json:"reason"`
+}
+
+// String returns a human-readable summary of the comparison.
+func (r *CompareResult) String() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "comparison: winner=%s (A: %.2f, B: %.2f)\n", r.Winner, r.ScoreA, r.ScoreB)
+	for _, c := range r.Criteria {
+		fmt.Fprintf(&b, "    %s: A=%.2f B=%.2f winner=%s — %s\n", c.Name, c.ScoreA, c.ScoreB, c.Winner, c.Reason)
+	}
+	if r.Reasoning != "" {
+		fmt.Fprintf(&b, "    reasoning: %s\n", r.Reasoning)
+	}
+	return b.String()
 }
 
 // CompareBuilder constructs and executes an A/B comparison.
@@ -41,13 +57,13 @@ func (b *CompareBuilder) Criteria(criterion string) *CompareBuilder {
 	return b
 }
 
-// Context adds background information.
+// Context adds background information for the judge.
 func (b *CompareBuilder) Context(ctx string) *CompareBuilder {
 	b.context = ctx
 	return b
 }
 
-// Model overrides the judge model.
+// Model overrides the judge model for this comparison.
 func (b *CompareBuilder) Model(model string) *CompareBuilder {
 	b.model = model
 	return b
@@ -61,7 +77,7 @@ func (b *CompareBuilder) Judge() (*CompareResult, error) {
 // JudgeContext executes the comparison with the given context.
 func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, error) {
 	if len(b.criteria) == 0 {
-		return nil, errors.New("sense: no criteria provided (call Criteria() at least once)")
+		return nil, ErrNoCriteria
 	}
 
 	if shouldSkip() {
@@ -72,13 +88,17 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 	outputB := serializeOutput(b.outputB)
 	userMsg := buildCompareUserMessage(outputA, outputB, b.criteria, b.context)
 
-	ctx, cancel := context.WithTimeout(ctx, globalConfig.Timeout)
-	defer cancel()
+	timeout := getTimeout()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 
 	start := time.Now()
 
 	client := getClient()
-	raw, _, err := client.call(ctx, callRequest{
+	raw, usage, err := client.call(ctx, &callRequest{
 		systemPrompt: compareSystemPrompt,
 		userMessage:  userMsg,
 		toolName:     "submit_comparison",
@@ -91,9 +111,17 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 
 	var result CompareResult
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, &Error{Op: "compare", Message: "failed to parse comparison result", Err: err}
+		return nil, &Error{Op: "compare", Message: "failed to parse result", Err: err}
 	}
 
 	result.Duration = time.Since(start)
+	result.Model = b.model
+	if result.Model == "" {
+		result.Model = getModel()
+	}
+	if usage != nil {
+		result.TokensUsed = usage.InputTokens + usage.OutputTokens
+	}
+
 	return &result, nil
 }

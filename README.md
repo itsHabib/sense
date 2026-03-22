@@ -32,7 +32,7 @@ export ANTHROPIC_API_KEY=...
 
 ## Usage
 
-### Assert — fail tests on fuzzy expectations
+### Assert — report failure, test continues
 
 ```go
 import "github.com/itsHabib/sense"
@@ -48,11 +48,21 @@ func TestMyAgent(t *testing.T) {
 }
 ```
 
-Calls `t.Fatal()` on failure with detailed output:
+### Require — report failure, test stops
+
+```go
+sense.Require(t, output).
+    Expect("produces valid Go code").
+    Run()
+```
+
+`Assert` uses `t.Error()` (test continues). `Require` uses `t.Fatal()` (test stops). Same pattern as testify.
+
+### Failure output
 
 ```
 --- FAIL: TestMyAgent (2.34s)
-    agent_test.go:15: agent assertion failed (1/2 passed, score: 0.50)
+    agent_test.go:15: evaluation: 1/2 passed, score: 0.50
 
         ✓ produces valid Go code
           reason: output contains syntactically valid Go with package declaration
@@ -118,13 +128,21 @@ Skip all agent assertions when you don't have an API key:
 SENSE_SKIP=1 go test ./...
 ```
 
-All `Assert` and `Eval` calls become no-ops that pass immediately.
+All `Assert`, `Require`, and `Eval` calls become no-ops that pass immediately.
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ANTHROPIC_API_KEY` | Claude API key | Required |
+| `SENSE_MODEL` | Override default judge model | `claude-sonnet-4-6` |
+| `SENSE_SKIP` | Set to `1` to skip all assertions | unset |
 
 ## How It Works
 
 1. Your expectations become a numbered list in a prompt
 2. Claude is forced to call a `submit_evaluation` tool via `tool_choice`
 3. The tool's input schema enforces structured JSON (pass/fail per expectation, confidence, reason, evidence)
-4. Sense unmarshals the tool call result and either passes the test or calls `t.Fatal()`
+4. Sense unmarshals the tool call result and either passes the test or calls `t.Error()`/`t.Fatal()`
 
 No prompt engineering. No JSON parsing. No "hope the model returns valid output." The schema is enforced server-side.

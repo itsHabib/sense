@@ -42,18 +42,18 @@ func (b *AssertBuilder) RunContext(ctx context.Context) {
 	result, err := b.eval.JudgeContext(ctx)
 	if err != nil {
 		if b.fatal {
-			b.t.Fatalf("sense assertion error: %v", err)
+			b.t.Fatalf("%v", err)
 		} else {
-			b.t.Errorf("sense assertion error: %v", err)
+			b.t.Errorf("%v", err)
 		}
 		return
 	}
 
 	if !result.Pass {
 		if b.fatal {
-			b.t.Fatal(result.FormatResult())
+			b.t.Fatal(result.String())
 		} else {
-			b.t.Error(result.FormatResult())
+			b.t.Error(result.String())
 		}
 	}
 }

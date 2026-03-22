@@ -26,7 +26,6 @@ func newClaudeClient(apiKey string) *claudeClient {
 	return &claudeClient{client: client}
 }
 
-// evalToolSchema is the JSON schema for the submit_evaluation tool.
 var evalToolSchema = anthropic.ToolInputSchemaParam{
 	Properties: map[string]any{
 		"pass": map[string]any{
@@ -74,7 +73,6 @@ var evalToolSchema = anthropic.ToolInputSchemaParam{
 	Required: []string{"pass", "score", "checks"},
 }
 
-// compareToolSchema is the JSON schema for the submit_comparison tool.
 var compareToolSchema = anthropic.ToolInputSchemaParam{
 	Properties: map[string]any{
 		"winner": map[string]any{
@@ -122,7 +120,9 @@ type callRequest struct {
 	model        string
 }
 
-func (c *claudeClient) call(ctx context.Context, req callRequest) (json.RawMessage, *Usage, error) {
+// call sends a tool_use request to Claude and returns the tool call arguments as raw JSON.
+// Retries on rate limits and server errors with exponential backoff.
+func (c *claudeClient) call(ctx context.Context, req *callRequest) (json.RawMessage, *Usage, error) {
 	model := req.model
 	if model == "" {
 		model = getModel()
@@ -149,15 +149,18 @@ func (c *claudeClient) call(ctx context.Context, req callRequest) (json.RawMessa
 		ToolChoice: anthropic.ToolChoiceParamOfTool(req.toolName),
 	}
 
-	maxRetries := globalConfig.MaxRetries
-	var lastErr error
+	maxRetries := getMaxRetries()
+	if maxRetries < 1 {
+		maxRetries = 1 // Always try at least once.
+	}
 
+	var lastErr error
 	for attempt := range maxRetries {
 		message, err := c.client.Messages.New(ctx, params)
 		if err != nil {
 			if isRetryable(err) && attempt < maxRetries-1 {
 				lastErr = err
-				backoff(attempt)
+				backoff(ctx, attempt)
 				continue
 			}
 			return nil, nil, fmt.Errorf("api call failed: %w", err)
@@ -168,9 +171,8 @@ func (c *claudeClient) call(ctx context.Context, req callRequest) (json.RawMessa
 			OutputTokens: int(message.Usage.OutputTokens),
 		}
 
-		// Extract tool call result
-		for _, block := range message.Content {
-			if variant, ok := block.AsAny().(anthropic.ToolUseBlock); ok {
+		for i := range message.Content {
+			if variant, ok := message.Content[i].AsAny().(anthropic.ToolUseBlock); ok {
 				raw := json.RawMessage(variant.JSON.Input.Raw())
 				return raw, usage, nil
 			}
@@ -180,7 +182,7 @@ func (c *claudeClient) call(ctx context.Context, req callRequest) (json.RawMessa
 	}
 
 	if lastErr != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrRateLimit, lastErr)
+		return nil, nil, fmt.Errorf("%w: %w", ErrRateLimit, lastErr)
 	}
 	return nil, nil, ErrNoToolCall
 }
@@ -191,6 +193,8 @@ type Usage struct {
 	OutputTokens int
 }
 
+// isRetryable reports whether the error is a transient API error
+// (rate limit or server error) that should be retried.
 func isRetryable(err error) bool {
 	var apiErr *anthropic.Error
 	if errors.As(err, &apiErr) {
@@ -200,7 +204,14 @@ func isRetryable(err error) bool {
 	return false
 }
 
-func backoff(attempt int) {
+// backoff sleeps for an exponential duration capped at 30s,
+// or returns early if the context is canceled.
+func backoff(ctx context.Context, attempt int) {
 	delay := min(time.Duration(math.Pow(2, float64(attempt)))*time.Second, 30*time.Second)
-	time.Sleep(delay)
+	t := time.NewTimer(delay)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+	case <-t.C:
+	}
 }

@@ -2,10 +2,11 @@ package sense
 
 import (
 	"os"
+	"sync"
 	"time"
 )
 
-// Config holds global AgentKit configuration.
+// Config holds global configuration for the sense package.
 type Config struct {
 	// APIKey for Claude. Default: $ANTHROPIC_API_KEY
 	APIKey string
@@ -13,26 +14,37 @@ type Config struct {
 	// Model for evaluations. Default: "claude-sonnet-4-6"
 	Model string
 
-	// Timeout per API call. Default: 30s
+	// Timeout per API call. Default: 30s.
+	// Set to -1 to explicitly disable timeouts.
 	Timeout time.Duration
 
-	// MaxRetries on transient failures. Default: 3
+	// MaxRetries on transient failures. Default: 3.
+	// Set to -1 to explicitly disable retries.
 	MaxRetries int
 
 	// Cache for response caching. Default: nil (no caching)
 	Cache Cache
 }
 
-var globalConfig = Config{
-	Model:      "claude-sonnet-4-6",
-	Timeout:    30 * time.Second,
-	MaxRetries: 3,
-}
+var (
+	mu           sync.RWMutex
+	globalConfig = Config{
+		Model:      "claude-sonnet-4-6",
+		Timeout:    30 * time.Second,
+		MaxRetries: 3,
+	}
 
-var globalClient *claudeClient
+	clientOnce   sync.Once
+	globalClient *claudeClient
+)
 
 // Configure sets global defaults. Call in TestMain or init.
+// Fields are applied as overrides — only non-zero values are set.
+// Use -1 for Timeout or MaxRetries to explicitly set zero behavior.
 func Configure(cfg Config) {
+	mu.Lock()
+	defer mu.Unlock()
+
 	if cfg.APIKey != "" {
 		globalConfig.APIKey = cfg.APIKey
 	}
@@ -40,19 +52,32 @@ func Configure(cfg Config) {
 		globalConfig.Model = cfg.Model
 	}
 	if cfg.Timeout != 0 {
-		globalConfig.Timeout = cfg.Timeout
+		if cfg.Timeout < 0 {
+			globalConfig.Timeout = 0
+		} else {
+			globalConfig.Timeout = cfg.Timeout
+		}
 	}
 	if cfg.MaxRetries != 0 {
-		globalConfig.MaxRetries = cfg.MaxRetries
+		if cfg.MaxRetries < 0 {
+			globalConfig.MaxRetries = 0
+		} else {
+			globalConfig.MaxRetries = cfg.MaxRetries
+		}
 	}
 	if cfg.Cache != nil {
 		globalConfig.Cache = cfg.Cache
 	}
-	// Reset client so it picks up new config
+
+	// Reset client so it picks up new config on next use.
+	clientOnce = sync.Once{}
 	globalClient = nil
 }
 
 func getAPIKey() string {
+	mu.RLock()
+	defer mu.RUnlock()
+
 	if globalConfig.APIKey != "" {
 		return globalConfig.APIKey
 	}
@@ -63,7 +88,21 @@ func getModel() string {
 	if m := os.Getenv("SENSE_MODEL"); m != "" {
 		return m
 	}
+	mu.RLock()
+	defer mu.RUnlock()
 	return globalConfig.Model
+}
+
+func getTimeout() time.Duration {
+	mu.RLock()
+	defer mu.RUnlock()
+	return globalConfig.Timeout
+}
+
+func getMaxRetries() int {
+	mu.RLock()
+	defer mu.RUnlock()
+	return globalConfig.MaxRetries
 }
 
 func shouldSkip() bool {
@@ -71,8 +110,8 @@ func shouldSkip() bool {
 }
 
 func getClient() *claudeClient {
-	if globalClient == nil {
+	clientOnce.Do(func() {
 		globalClient = newClaudeClient(getAPIKey())
-	}
+	})
 	return globalClient
 }
