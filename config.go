@@ -35,7 +35,7 @@ var (
 	}
 
 	clientOnce   sync.Once
-	globalClient *claudeClient
+	globalClient caller
 )
 
 // Configure sets global defaults. Call in TestMain or init.
@@ -109,9 +109,18 @@ func shouldSkip() bool {
 	return os.Getenv("SENSE_SKIP") == "1"
 }
 
-func getClient() *claudeClient {
+func getClient() caller {
 	clientOnce.Do(func() {
 		globalClient = newClaudeClient(getAPIKey())
 	})
 	return globalClient
+}
+
+// setClient replaces the global client. Used by tests to inject mocks.
+func setClient(c caller) {
+	mu.Lock()
+	defer mu.Unlock()
+	clientOnce = sync.Once{}
+	clientOnce.Do(func() {}) // mark as done so getClient won't overwrite
+	globalClient = c
 }

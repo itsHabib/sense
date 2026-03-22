@@ -69,6 +69,8 @@ func serializeOutput(output any) string {
 		return v
 	case []byte:
 		return string(v)
+	case error:
+		return v.Error()
 	case fmt.Stringer:
 		return v.String()
 	default:
