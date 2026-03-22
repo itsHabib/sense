@@ -11,12 +11,23 @@ package sense
 
 import "testing"
 
-// Assert creates a test assertion that calls t.Fatal() if any expectation fails.
+// Assert creates a test assertion that calls t.Error() on failure (test continues).
 // The output can be a string, []byte, or any type (structs are serialized to JSON).
 func Assert(t testing.TB, output any) *AssertBuilder {
 	return &AssertBuilder{
-		t:    t,
-		eval: &EvalBuilder{output: output},
+		t:     t,
+		eval:  &EvalBuilder{output: output},
+		fatal: false,
+	}
+}
+
+// Require creates a test assertion that calls t.Fatal() on failure (test stops).
+// The output can be a string, []byte, or any type (structs are serialized to JSON).
+func Require(t testing.TB, output any) *AssertBuilder {
+	return &AssertBuilder{
+		t:     t,
+		eval:  &EvalBuilder{output: output},
+		fatal: true,
 	}
 }
 

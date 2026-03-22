@@ -6,10 +6,10 @@ import (
 )
 
 // AssertBuilder constructs and executes a test assertion.
-// Calls t.Fatal() if any expectation fails.
 type AssertBuilder struct {
-	t    testing.TB
-	eval *EvalBuilder
+	t     testing.TB
+	eval  *EvalBuilder
+	fatal bool
 }
 
 // Expect adds a natural language expectation. Chainable.
@@ -30,7 +30,7 @@ func (b *AssertBuilder) Model(model string) *AssertBuilder {
 	return b
 }
 
-// Run executes the assertion. Calls t.Fatal() on failure.
+// Run executes the assertion.
 func (b *AssertBuilder) Run() {
 	b.RunContext(context.Background())
 }
@@ -41,11 +41,19 @@ func (b *AssertBuilder) RunContext(ctx context.Context) {
 
 	result, err := b.eval.JudgeContext(ctx)
 	if err != nil {
-		b.t.Fatalf("agent assertion error: %v", err)
+		if b.fatal {
+			b.t.Fatalf("sense assertion error: %v", err)
+		} else {
+			b.t.Errorf("sense assertion error: %v", err)
+		}
 		return
 	}
 
 	if !result.Pass {
-		b.t.Fatal(result.FormatResult())
+		if b.fatal {
+			b.t.Fatal(result.FormatResult())
+		} else {
+			b.t.Error(result.FormatResult())
+		}
 	}
 }
