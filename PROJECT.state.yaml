@@ -37,15 +37,33 @@ tracks:
       batch-tests:            { status: done, notes: "12 unit tests" }
       e2e-validation:         { status: done, notes: "batch submits work, but API is slow (minutes-hours)" }
 
+  cost-tracking:
+    description: "Session-level token usage tracking with atomic counters"
+    status: done
+    phases:
+      atomic-counters:       { status: done, notes: "atomic.Int64 for input/output tokens and call count" }
+      usage-wiring:          { status: done, notes: "recordUsage called in eval, compare, extract after every call" }
+      session-usage:         { status: done, notes: "Usage() returns SessionUsage snapshot with String()" }
+      unit-tests:            { status: done, notes: "5 tests — accumulation, concurrency, format, compare path, unmarshal failure" }
+      e2e-tests:             { status: done, notes: "before/after snapshot around real API call + TestMain summary" }
+
+  extract:
+    description: "Generic structured extraction — parse unstructured text into typed Go structs"
+    status: done
+    phases:
+      schema-generation:     { status: done, notes: "reflection-based, cached per type, supports all Go primitives + nested structs + slices + pointers" }
+      extract-builder:       { status: done, notes: "Extract[T](s, text) generic function, Context/Model/Run chain" }
+      extract-result:        { status: done, notes: "ExtractResult[T] with Data, Duration, TokensUsed, Model" }
+      sense-tag:             { status: done, notes: "sense:\"description\" struct tag for field descriptions" }
+      unit-tests:            { status: done, notes: "75 tests — 12 behavior + 63 schema (type mapping, tags, pointers, slices, nesting, caching, edge cases)" }
+      e2e-tests:             { status: done, notes: "7 tests — AWS error, log line, k8s event, SQL error, git commit, nginx log, optional fields" }
+
   next-features:
     description: "Planned features — see docs/NEXT.md for full specs"
     status: pending
     phases:
-      cost-tracking:
-        status: next
-        notes: "Atomic token counters on Session, Usage() summary method"
       custom-evaluators:
-        status: pending
+        status: next
         notes: "Checker interface, deterministic checks run before LLM, fail-fast"
       snapshots:
         status: pending

@@ -20,6 +20,8 @@ func TestAgentProducesDoc(t *testing.T) {
 
 You're testing agents. Agents produce non-deterministic output. You can't `assert.Equal`. You can't `assert.Contains` because format varies. You need another agent to judge whether the output meets fuzzy, semantic requirements.
 
+Sense uses the [Anthropic API](https://docs.anthropic.com/en/docs) (Claude) to evaluate output. It forces structured responses via Claude's `tool_use` feature — no prompt engineering, no JSON parsing on your end. Requires an Anthropic API key.
+
 ## Install
 
 ```bash
@@ -169,7 +171,21 @@ s := sense.NewSession(sense.Config{
 defer s.Close()
 ```
 
-## Offline Development
+## Running Tests
+
+Unit tests use a mock caller and don't hit the API:
+
+```bash
+go test ./...
+```
+
+E2e tests hit the real Claude API and **cost money** (~$0.10-0.15 per full suite run):
+
+```bash
+ANTHROPIC_API_KEY=... go test -tags=e2e -v ./...
+```
+
+### Offline Development
 
 Skip all agent assertions when you don't have an API key:
 
@@ -177,7 +193,7 @@ Skip all agent assertions when you don't have an API key:
 SENSE_SKIP=1 go test ./...
 ```
 
-All `Assert`, `Require`, and `Eval` calls become no-ops that pass immediately.
+All `Assert`, `Require`, `Eval`, and `Extract` calls become no-ops that pass immediately.
 
 ## Environment Variables
 
