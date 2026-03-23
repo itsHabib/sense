@@ -2,38 +2,24 @@
 
 Make sense of non-deterministic output. Evaluate, compare, and extract structured data from text using Claude.
 
-Sense uses the [Anthropic API](https://docs.anthropic.com/en/docs) (Claude) with forced `tool_use` for structured responses — no prompt engineering, no JSON parsing on your end. Requires an Anthropic API key.
-
-### Assert — judge non-deterministic output in tests
-
 ```go
-func TestAgentOutput(t *testing.T) {
-    doc := runMyAgent()
+s := sense.NewSession(sense.Config{})
+defer s.Close()
 
-    s.Assert(t, doc).
-        Expect("covers all sections from the brief").
-        Expect("includes actionable recommendations").
-        Expect("does not hallucinate data sources").
-        Context("task was to write a quarterly report").
-        Run()
-}
-```
+// Judge agent output against expectations
+s.Assert(t, doc).
+    Expect("covers all sections from the brief").
+    Expect("includes actionable recommendations").
+    Run()
 
-### Extract — parse unstructured text into typed structs
-
-```go
-type MountError struct {
-    Device   string `json:"device" sense:"The device path"`
-    VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
-    Message  string `json:"message"`
-}
-
+// Parse unstructured text into typed structs
 result, err := sense.Extract[MountError](s,
     "device /dev/sdf already mounted with vol-0abc123").Run()
-
 fmt.Println(result.Data.Device)   // "/dev/sdf"
 fmt.Println(result.Data.VolumeID) // "vol-0abc123"
 ```
+
+Sense uses the [Anthropic API](https://docs.anthropic.com/en/docs) (Claude) with forced `tool_use` for structured responses — no prompt engineering, no JSON parsing on your end. Requires an Anthropic API key.
 
 ## Install
 
