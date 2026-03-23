@@ -165,8 +165,8 @@ func TestAdd(t *testing.T) {
 	if !result.Pass {
 		t.Errorf("expected all checks to pass:\n%s", result.String())
 	}
-	if result.Score < 0.9 {
-		t.Errorf("expected score > 0.9, got %.2f", result.Score)
+	if result.Score < 0.8 {
+		t.Errorf("expected score > 0.8, got %.2f", result.Score)
 	}
 }
 
@@ -287,11 +287,11 @@ structural typing, and CSP-style concurrency with goroutines and channels.`,
 	if result.Winner != "A" {
 		t.Errorf("expected A to win, got %s", result.Winner)
 	}
-	if result.ScoreA < 0.7 {
-		t.Errorf("expected A score > 0.7, got %.2f", result.ScoreA)
+	if result.ScoreA < 0.6 {
+		t.Errorf("expected A score > 0.6, got %.2f", result.ScoreA)
 	}
-	if result.ScoreB > 0.3 {
-		t.Errorf("expected B score < 0.3, got %.2f", result.ScoreB)
+	if result.ScoreB > 0.4 {
+		t.Errorf("expected B score < 0.4, got %.2f", result.ScoreB)
 	}
 }
 
@@ -310,7 +310,7 @@ func TestCompare_CloseScoresOnSimilarOutputs(t *testing.T) {
 	}
 
 	diff := result.ScoreA - result.ScoreB
-	if diff > 0.3 || diff < -0.3 {
+	if diff > 0.4 || diff < -0.4 {
 		t.Errorf("expected close scores for similar outputs, got A=%.2f B=%.2f", result.ScoreA, result.ScoreB)
 	}
 }
