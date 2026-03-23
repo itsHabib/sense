@@ -267,7 +267,7 @@ func ParseTicket(s sense.Extractor, raw string) (*Ticket, error) {
 
 No prompt engineering. No JSON parsing. No "hope the model returns valid output." The schema is enforced server-side.
 
-## Roadmap
+## What's Next
 
 - [ ] **Deterministic checks** — mix `Check(sense.ValidJSON())` with LLM-judged `Expect()` in the same assertion. Deterministic checks run first; if any fail, skip the LLM call. Free, fast, saves money.
 - [ ] **Extract validation** — `Validate(func(T) error)` on extracted structs. Catch hallucinated values (negative totals, impossible dates) without another LLM call.
@@ -279,4 +279,4 @@ No prompt engineering. No JSON parsing. No "hope the model returns valid output.
 - [ ] **ExtractSlice[T]** — extract `[]T` from text with multiple items (invoices, log batches, entity lists).
 - [ ] **Cost budget** — `MaxCost: sense.Dollars(0.50)` to cap session spend. Prevents runaway costs in CI.
 
-See [docs/NEXT.md](docs/NEXT.md) for details.
+These are ideas, not commitments. See [docs/NEXT.md](docs/NEXT.md) for details.
