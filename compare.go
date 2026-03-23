@@ -18,6 +18,7 @@ type CompareResult struct {
 	Duration   time.Duration     `json:"-"`
 	TokensUsed int               `json:"-"`
 	Model      string            `json:"-"`
+	Usage      Usage             `json:"-"`
 }
 
 // CriterionResult is the result for a single comparison criterion.
@@ -124,6 +125,7 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 	result.Model = model
 	if usage != nil {
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
+		result.Usage = *usage
 	}
 
 	return &result, nil

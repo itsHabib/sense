@@ -214,6 +214,71 @@ func TestAssert_PassesWithMock(t *testing.T) {
 		Run()
 }
 
+func TestAssert_CapturesUsage(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{
+			"pass": true,
+			"score": 1.0,
+			"checks": [{"expect": "is valid", "pass": true, "confidence": 0.99, "reason": "yes"}]
+		}`),
+		usage: &Usage{InputTokens: 120, OutputTokens: 45},
+	}
+	s := testSession(mock)
+
+	var u Usage
+	s.Assert(t, "test output").
+		Expect("is valid").
+		Usage(&u).
+		Run()
+
+	if u.InputTokens != 120 {
+		t.Errorf("expected 120 input tokens, got %d", u.InputTokens)
+	}
+	if u.OutputTokens != 45 {
+		t.Errorf("expected 45 output tokens, got %d", u.OutputTokens)
+	}
+}
+
+func TestAssert_NilUsageNoPanic(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{
+			"pass": true,
+			"score": 1.0,
+			"checks": [{"expect": "is valid", "pass": true, "confidence": 0.99, "reason": "yes"}]
+		}`),
+		usage: &Usage{InputTokens: 50, OutputTokens: 50},
+	}
+	s := testSession(mock)
+
+	// No Usage() call — should not panic.
+	s.Assert(t, "test output").
+		Expect("is valid").
+		Run()
+}
+
+func TestEvalResult_HasUsageBreakdown(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{
+			"pass": true,
+			"score": 1.0,
+			"checks": [{"expect": "ok", "pass": true, "confidence": 0.9, "reason": "fine"}]
+		}`),
+		usage: &Usage{InputTokens: 200, OutputTokens: 80},
+	}
+	s := testSession(mock)
+
+	result, err := s.Eval("test").Expect("ok").Judge()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Usage.InputTokens != 200 {
+		t.Errorf("expected 200 input tokens, got %d", result.Usage.InputTokens)
+	}
+	if result.Usage.OutputTokens != 80 {
+		t.Errorf("expected 80 output tokens, got %d", result.Usage.OutputTokens)
+	}
+}
+
 func TestRequire_PassesWithMock(t *testing.T) {
 	mock := &mockCaller{
 		response: json.RawMessage(`{

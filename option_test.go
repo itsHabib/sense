@@ -100,4 +100,3 @@ func TestNew_MultipleOptions(t *testing.T) {
 		t.Errorf("expected 5, got %d", s.maxRetries)
 	}
 }
-

@@ -10,6 +10,7 @@ type AssertBuilder struct {
 	t     testing.TB
 	eval  *EvalBuilder
 	fatal bool
+	usage *Usage
 }
 
 // Expect adds a natural language expectation. Chainable.
@@ -30,6 +31,17 @@ func (b *AssertBuilder) Model(model string) *AssertBuilder {
 	return b
 }
 
+// Usage captures the token usage from the API call into the provided pointer.
+// This is useful for Assert/Require which don't return a result.
+//
+//	var u sense.Usage
+//	sense.Assert(t, output).Expect("...").Usage(&u).Run()
+//	fmt.Println(u.InputTokens, u.OutputTokens)
+func (b *AssertBuilder) Usage(u *Usage) *AssertBuilder {
+	b.usage = u
+	return b
+}
+
 // Run executes the assertion.
 func (b *AssertBuilder) Run() {
 	b.RunContext(context.Background())
@@ -47,6 +59,10 @@ func (b *AssertBuilder) RunContext(ctx context.Context) {
 			b.t.Errorf("%v", err)
 		}
 		return
+	}
+
+	if b.usage != nil {
+		*b.usage = result.Usage
 	}
 
 	if !result.Pass {

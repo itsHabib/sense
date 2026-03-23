@@ -16,6 +16,7 @@ type EvalResult struct {
 	Duration   time.Duration `json:"-"`
 	TokensUsed int           `json:"-"`
 	Model      string        `json:"-"`
+	Usage      Usage         `json:"-"`
 }
 
 // Check is a single expectation evaluation.
@@ -157,6 +158,7 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 	result.Model = model
 	if usage != nil {
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
+		result.Usage = *usage
 	}
 
 	return &result, nil
