@@ -1,0 +1,55 @@
+# Sense SDK Project State
+#
+# Tracks completion status across all work streams.
+# Read by /where-are-we to show current status and next steps.
+#
+# Status values: done | in_progress | next | pending
+#   done        — fully shipped (code merged, tests pass)
+#   in_progress — actively being built
+#   next        — ready to start, no blockers
+#   pending     — waiting on dependencies
+
+project: sense
+updated: 2026-03-22
+
+tracks:
+  core:
+    description: "Core eval framework — Session, Eval, Compare, Assert, Require"
+    status: done
+    phases:
+      api-design:           { status: done, notes: "Session-based, no globals" }
+      eval-builder:         { status: done, notes: "Eval + EvalResult + Check types" }
+      compare-builder:      { status: done, notes: "A/B comparison with criteria" }
+      assert-require:       { status: done, notes: "t.Error / t.Fatal wrappers" }
+      prompt-engineering:    { status: done, notes: "tool_use forced via ToolChoice" }
+      error-handling:        { status: done, notes: "typed errors, retries, backoff" }
+      skip-mode:            { status: done, notes: "SENSE_SKIP=1 for offline dev" }
+      unit-tests:           { status: done, notes: "30 tests with mock caller" }
+      e2e-tests:            { status: done, notes: "21 tests hitting real API, all pass" }
+
+  batch-client:
+    description: "Request batching via Anthropic Batch API — 50% cost reduction"
+    status: done
+    phases:
+      batcher-implementation: { status: done, notes: "channel-based, no mutex" }
+      batch-caller:           { status: done, notes: "implements caller interface" }
+      session-integration:    { status: done, notes: "BatchConfig on NewSession" }
+      batch-tests:            { status: done, notes: "12 unit tests" }
+      e2e-validation:         { status: done, notes: "batch submits work, but API is slow (minutes-hours)" }
+
+  next-features:
+    description: "Planned features — see docs/NEXT.md for full specs"
+    status: pending
+    phases:
+      cost-tracking:
+        status: next
+        notes: "Atomic token counters on Session, Usage() summary method"
+      custom-evaluators:
+        status: pending
+        notes: "Checker interface, deterministic checks run before LLM, fail-fast"
+      snapshots:
+        status: pending
+        notes: "Save eval results to disk, detect regressions across runs"
+      multi-judge-consensus:
+        status: pending
+        notes: "Fan out to N models, require agreement via configurable strategy"
