@@ -63,17 +63,22 @@ func TestMyAgent(t *testing.T) {
 When a check fails, you get structured feedback — what passed, what failed, why, and evidence:
 
 ```
---- FAIL: TestMyAgent (2.34s)
+--- FAIL: TestMyAgent (4.82s)
     agent_test.go:15: evaluation: 1/2 passed, score: 0.50
 
         ✓ produces valid Go code
-          reason: output contains syntactically valid Go with package declaration
+          reason: The snippet is syntactically valid Go code for a simple addition function.
+          evidence: func Add(a, b int) int { return a + b }
           confidence: 0.95
 
         ✗ handles errors idiomatically
-          reason: no error handling found — missing if err != nil pattern
-          evidence: function returns (string) instead of (string, error)
-          confidence: 0.92
+          reason: The output is a trivial math function with no error handling whatsoever.
+            It does not demonstrate idiomatic Go error handling (e.g., returning an error
+            as a second value, using fmt.Errorf, etc.), nor does it relate to a REST API
+            server where error handling would be expected.
+          evidence: func Add(a, b int) int { return a + b } — no error return value,
+            no error handling logic, no REST API context
+          confidence: 0.99
 ```
 
 ### Extract — parse unstructured text into Go structs
