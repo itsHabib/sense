@@ -6,7 +6,7 @@ Make sense of non-deterministic output. Agent-powered assertions for Go tests.
 func TestAgentProducesDoc(t *testing.T) {
     doc := runMyAgentE2E()
 
-    sense.Assert(t, doc).
+    s.Assert(t, doc).
         Expect("covers all sections from the brief").
         Expect("includes actionable recommendations").
         Expect("does not hallucinate data sources").
@@ -32,15 +32,33 @@ export ANTHROPIC_API_KEY=...
 
 ## Usage
 
+Create a session, then use it for assertions:
+
+```go
+import (
+    "os"
+    "testing"
+
+    "github.com/itsHabib/sense"
+)
+
+var s *sense.Session
+
+func TestMain(m *testing.M) {
+    s = sense.NewSession(sense.Config{})
+    code := m.Run()
+    s.Close()
+    os.Exit(code)
+}
+```
+
 ### Assert — report failure, test continues
 
 ```go
-import "github.com/itsHabib/sense"
-
 func TestMyAgent(t *testing.T) {
     output := runMyAgent()
 
-    sense.Assert(t, output).
+    s.Assert(t, output).
         Expect("produces valid Go code").
         Expect("handles errors idiomatically").
         Context("task was to write a REST API server").
@@ -51,7 +69,7 @@ func TestMyAgent(t *testing.T) {
 ### Require — report failure, test stops
 
 ```go
-sense.Require(t, output).
+s.Require(t, output).
     Expect("produces valid Go code").
     Run()
 ```
@@ -77,7 +95,7 @@ sense.Require(t, output).
 ### Eval — inspect results programmatically
 
 ```go
-result, err := sense.Eval(output).
+result, err := s.Eval(output).
     Expect("is a complete sentence").
     Expect("mentions an animal").
     Expect("contains a number").
@@ -94,7 +112,7 @@ for _, c := range result.FailedChecks() {
 ### Compare — A/B test two outputs
 
 ```go
-cmp, err := sense.Compare(outputV1, outputV2).
+cmp, err := s.Compare(outputV1, outputV2).
     Criteria("completeness").
     Criteria("clarity").
     Criteria("professionalism").
@@ -106,18 +124,45 @@ fmt.Println(cmp.ScoreB)     // 0.10
 fmt.Println(cmp.Reasoning)  // "Output A is significantly better..."
 ```
 
-## Configuration
+## Batching
+
+Enable batching for 50% cost reduction. Requests are collected and submitted as a single Anthropic Batch API call:
 
 ```go
 func TestMain(m *testing.M) {
-    sense.Configure(sense.Config{
-        APIKey:     os.Getenv("ANTHROPIC_API_KEY"), // default: $ANTHROPIC_API_KEY
-        Model:      "claude-sonnet-4-6",            // default
-        Timeout:    30 * time.Second,               // default
-        MaxRetries: 3,                              // default
+    s = sense.NewSession(sense.Config{
+        Batch: &sense.BatchConfig{
+            MaxSize: 50,                   // flush after 50 requests
+            MaxWait: 2 * time.Second,      // or after 2s, whichever first
+        },
     })
-    os.Exit(m.Run())
+    code := m.Run()
+    s.Close()
+    os.Exit(code)
 }
+```
+
+Use `t.Parallel()` in your tests so requests arrive concurrently and get batched together:
+
+```go
+func TestEval_Quality(t *testing.T) {
+    t.Parallel()
+    s.Assert(t, output).Expect("is well written").Run()
+}
+```
+
+When `Batch` is nil (default), each call hits the API individually — no change in behavior.
+
+## Configuration
+
+```go
+s := sense.NewSession(sense.Config{
+    APIKey:     os.Getenv("ANTHROPIC_API_KEY"), // default: $ANTHROPIC_API_KEY
+    Model:      "claude-sonnet-4-6",            // default
+    Timeout:    30 * time.Second,               // default
+    MaxRetries: 3,                              // default
+})
+defer s.Close()
 ```
 
 ## Offline Development

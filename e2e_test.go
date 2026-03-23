@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/itsHabib/sense"
 )
@@ -14,12 +13,7 @@ import (
 var s *sense.Session
 
 func TestMain(m *testing.M) {
-	s = sense.NewSession(sense.Config{
-		Batch: &sense.BatchConfig{
-			MaxSize: 50,
-			MaxWait: 2 * time.Second,
-		},
-	})
+	s = sense.NewSession(sense.Config{})
 	code := m.Run()
 	s.Close()
 	os.Exit(code)
