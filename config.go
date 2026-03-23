@@ -1,7 +1,9 @@
 package sense
 
 import (
+	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,6 +32,20 @@ type Config struct {
 	Batch *BatchConfig
 }
 
+// SessionUsage is a snapshot of accumulated token usage across a session.
+type SessionUsage struct {
+	InputTokens  int64
+	OutputTokens int64
+	TotalTokens  int64
+	Calls        int64
+}
+
+// String returns a human-readable summary of token usage.
+func (u SessionUsage) String() string {
+	return fmt.Sprintf("sense: %d calls, %d input tokens, %d output tokens",
+		u.Calls, u.InputTokens, u.OutputTokens)
+}
+
 // Session holds a configured client for making evaluations.
 // Create one with NewSession and pass it to your tests.
 type Session struct {
@@ -39,6 +55,10 @@ type Session struct {
 	maxRetries int
 	cache      Cache
 	batcher    *batcher
+
+	inputTokens  atomic.Int64
+	outputTokens atomic.Int64
+	callCount    atomic.Int64
 }
 
 // NewSession creates a Session from the given config.
@@ -88,6 +108,29 @@ func NewSession(cfg Config) *Session {
 func (s *Session) Close() {
 	if s.batcher != nil {
 		s.batcher.close()
+	}
+}
+
+// recordUsage accumulates token usage from a single call.
+// Safe for concurrent callers.
+func (s *Session) recordUsage(u *Usage) {
+	if u == nil {
+		return
+	}
+	s.inputTokens.Add(int64(u.InputTokens))
+	s.outputTokens.Add(int64(u.OutputTokens))
+	s.callCount.Add(1)
+}
+
+// Usage returns a snapshot of accumulated token usage across the session.
+func (s *Session) Usage() SessionUsage {
+	input := s.inputTokens.Load()
+	output := s.outputTokens.Load()
+	return SessionUsage{
+		InputTokens:  input,
+		OutputTokens: output,
+		TotalTokens:  input + output,
+		Calls:        s.callCount.Load(),
 	}
 }
 

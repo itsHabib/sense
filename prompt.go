@@ -62,6 +62,28 @@ func buildCompareUserMessage(outputA, outputB string, criteria []string, context
 	return b.String()
 }
 
+const extractSystemPrompt = `You are a precise data extractor. You will receive text and must extract structured data from it.
+
+Rules:
+- Extract only information explicitly present in the text
+- Do not infer, guess, or hallucinate values
+- If a field's value cannot be determined from the text, use the zero value (empty string, 0, false, null)
+- If the text is ambiguous, prefer the most literal interpretation
+- Extract exactly what the text says, even if it seems wrong`
+
+func buildExtractUserMessage(text, context string) string {
+	var b strings.Builder
+
+	if context != "" {
+		fmt.Fprintf(&b, "Context:\n%s\n\n", context)
+	}
+
+	fmt.Fprintf(&b, "Text to extract from:\n\"\"\"\n%s\n\"\"\"\n\n", text)
+	b.WriteString("Extract the structured data and submit your result.")
+
+	return b.String()
+}
+
 // serializeOutput converts any output type to a string for the prompt.
 func serializeOutput(output any) string {
 	switch v := output.(type) {

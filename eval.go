@@ -143,6 +143,7 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 		toolSchema:   evalToolSchema,
 		model:        model,
 	})
+	b.session.recordUsage(usage)
 	if err != nil {
 		return nil, &Error{Op: "eval", Message: "api call failed", Err: err}
 	}

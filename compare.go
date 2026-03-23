@@ -110,6 +110,7 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 		toolSchema:   compareToolSchema,
 		model:        model,
 	})
+	b.session.recordUsage(usage)
 	if err != nil {
 		return nil, &Error{Op: "compare", Message: "api call failed", Err: err}
 	}

@@ -17,6 +17,9 @@ var (
 
 	// ErrNoCriteria is returned when Judge is called with no Criteria calls.
 	ErrNoCriteria = errors.New("sense: no criteria provided (call Criteria at least once)")
+
+	// ErrNoText is returned when Extract is called with empty text.
+	ErrNoText = errors.New("sense: no text provided for extraction")
 )
 
 // Error wraps an underlying error with operation context.
