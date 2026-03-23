@@ -3,6 +3,8 @@
 Make sense of non-deterministic output. Agent-powered assertions for Go tests.
 
 ```go
+var s = sense.NewSession(sense.Config{})
+
 func TestAgentProducesDoc(t *testing.T) {
     doc := runMyAgentE2E()
 
@@ -152,6 +154,8 @@ func TestEval_Quality(t *testing.T) {
 ```
 
 When `Batch` is nil (default), each call hits the API individually — no change in behavior.
+
+**Note:** Batching trades latency for cost. The Batch API processes requests asynchronously — it can take minutes to hours depending on load. Use it for large test suites where 50% cost savings matter more than speed. For small suites, individual calls running in parallel are faster.
 
 ## Configuration
 
