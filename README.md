@@ -3,24 +3,27 @@
 Make sense of non-deterministic output. Evaluate, compare, and extract structured data from text using Claude.
 
 ```go
-var s = sense.NewSession(sense.Config{})
+s := sense.NewSession(sense.Config{})
+defer s.Close()
 
-func TestAgentProducesDoc(t *testing.T) {
-    doc := runMyAgentE2E()
+// Judge agent output against expectations
+s.Assert(t, doc).
+    Expect("covers all sections from the brief").
+    Expect("includes actionable recommendations").
+    Run()
 
-    s.Assert(t, doc).
-        Expect("covers all sections from the brief").
-        Expect("includes actionable recommendations").
-        Expect("does not hallucinate data sources").
-        Run()
-}
+// Parse unstructured text into typed structs
+result, err := sense.Extract[MountError](s,
+    "device /dev/sdf already mounted with vol-0abc123").Run()
+fmt.Println(result.Data.Device)   // "/dev/sdf"
+fmt.Println(result.Data.VolumeID) // "vol-0abc123"
 ```
 
 ## Why
 
-You're testing agents. Agents produce non-deterministic output. You can't `assert.Equal`. You can't `assert.Contains` because format varies. You need another agent to judge whether the output meets fuzzy, semantic requirements.
+You're working with non-deterministic output — from agents, LLMs, logs, error messages, APIs. You can't `assert.Equal`. You can't regex your way through every format variation. You need structured judgment and extraction.
 
-Sense uses the [Anthropic API](https://docs.anthropic.com/en/docs) (Claude) to evaluate output. It forces structured responses via Claude's `tool_use` feature — no prompt engineering, no JSON parsing on your end. Requires an Anthropic API key.
+Sense uses the [Anthropic API](https://docs.anthropic.com/en/docs) (Claude) to evaluate and extract. It forces structured responses via Claude's `tool_use` feature — no prompt engineering, no JSON parsing on your end. Requires an Anthropic API key.
 
 ## Install
 
@@ -36,27 +39,14 @@ export ANTHROPIC_API_KEY=...
 
 ## Usage
 
-Create a session, then use it for assertions:
+Create a session once, reuse it everywhere:
 
 ```go
-import (
-    "os"
-    "testing"
-
-    "github.com/itsHabib/sense"
-)
-
-var s *sense.Session
-
-func TestMain(m *testing.M) {
-    s = sense.NewSession(sense.Config{})
-    code := m.Run()
-    s.Close()
-    os.Exit(code)
-}
+s := sense.NewSession(sense.Config{})
+defer s.Close()
 ```
 
-### Assert — report failure, test continues
+### Assert — test assertion, continues on failure
 
 ```go
 func TestMyAgent(t *testing.T) {
@@ -70,17 +60,7 @@ func TestMyAgent(t *testing.T) {
 }
 ```
 
-### Require — report failure, test stops
-
-```go
-s.Require(t, output).
-    Expect("produces valid Go code").
-    Run()
-```
-
-`Assert` uses `t.Error()` (test continues). `Require` uses `t.Fatal()` (test stops). Same pattern as testify.
-
-### Failure output
+When a check fails, you get structured feedback — what passed, what failed, why, and evidence:
 
 ```
 --- FAIL: TestMyAgent (2.34s)
@@ -95,6 +75,38 @@ s.Require(t, output).
           evidence: function returns (string) instead of (string, error)
           confidence: 0.92
 ```
+
+### Extract — parse unstructured text into Go structs
+
+```go
+type MountError struct {
+    Device   string `json:"device" sense:"The device path"`
+    VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
+    Message  string `json:"message"`
+}
+
+result, err := sense.Extract[MountError](s,
+    "device /dev/sdf already mounted with vol-0abc123").
+    Context("AWS EC2 EBS error messages").
+    Run()
+
+fmt.Println(result.Data.Device)   // "/dev/sdf"
+fmt.Println(result.Data.VolumeID) // "vol-0abc123"
+```
+
+Schema is generated from your struct via reflection — `json` tags for field names, `sense` tags for descriptions. Pointer fields are optional; value fields are required.
+
+Works with nested structs, slices, and all Go primitive types. Not just for testing — use it anywhere you need structure from messy text (logs, error messages, API responses, support tickets).
+
+### Require — test assertion, stops on failure
+
+```go
+s.Require(t, output).
+    Expect("produces valid Go code").
+    Run()
+```
+
+`Assert` uses `t.Error()` (test continues). `Require` uses `t.Fatal()` (test stops). Same pattern as testify.
 
 ### Eval — inspect results programmatically
 
@@ -128,36 +140,14 @@ fmt.Println(cmp.ScoreB)     // 0.10
 fmt.Println(cmp.Reasoning)  // "Output A is significantly better..."
 ```
 
-## Batching
-
-Enable batching for 50% cost reduction. Requests are collected and submitted as a single Anthropic Batch API call:
+### Usage tracking
 
 ```go
-func TestMain(m *testing.M) {
-    s = sense.NewSession(sense.Config{
-        Batch: &sense.BatchConfig{
-            MaxSize: 50,                   // flush after 50 requests
-            MaxWait: 2 * time.Second,      // or after 2s, whichever first
-        },
-    })
-    code := m.Run()
-    s.Close()
-    os.Exit(code)
-}
+fmt.Println(s.Usage())
+// sense: 15 calls, 18420 input tokens, 4210 output tokens
 ```
 
-Use `t.Parallel()` in your tests so requests arrive concurrently and get batched together:
-
-```go
-func TestEval_Quality(t *testing.T) {
-    t.Parallel()
-    s.Assert(t, output).Expect("is well written").Run()
-}
-```
-
-When `Batch` is nil (default), each call hits the API individually — no change in behavior.
-
-**Note:** Batching trades latency for cost. The Batch API processes requests asynchronously — it can take minutes to hours depending on load. Use it for large test suites where 50% cost savings matter more than speed. For small suites, individual calls running in parallel are faster.
+Token usage is tracked across all operations using atomic counters — safe for concurrent use.
 
 ## Configuration
 
@@ -187,7 +177,7 @@ ANTHROPIC_API_KEY=... go test -tags=e2e -v ./...
 
 ### Offline Development
 
-Skip all agent assertions when you don't have an API key:
+Skip all sense calls when you don't have an API key:
 
 ```bash
 SENSE_SKIP=1 go test ./...
@@ -195,49 +185,28 @@ SENSE_SKIP=1 go test ./...
 
 All `Assert`, `Require`, `Eval`, and `Extract` calls become no-ops that pass immediately.
 
+## Batching
+
+Enable batching for 50% cost reduction. Requests are collected and submitted as a single Anthropic Batch API call:
+
+```go
+s = sense.NewSession(sense.Config{
+    Batch: &sense.BatchConfig{
+        MaxSize: 50,                   // flush after 50 requests
+        MaxWait: 2 * time.Second,      // or after 2s, whichever first
+    },
+})
+```
+
+**Note:** Batching trades latency for cost. The Batch API processes requests asynchronously — it can take minutes to hours depending on load. Use it for large test suites where 50% cost savings matter more than speed.
+
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ANTHROPIC_API_KEY` | Claude API key | Required |
 | `SENSE_MODEL` | Override default judge model | `claude-sonnet-4-6` |
-| `SENSE_SKIP` | Set to `1` to skip all assertions | unset |
-
-### Extract — parse unstructured text into Go structs
-
-```go
-type MountError struct {
-    Device   string `json:"device" sense:"The device path"`
-    VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
-    Message  string `json:"message"`
-}
-
-result, err := sense.Extract[MountError](s,
-    "device /dev/sdf already mounted with vol-0abc123").
-    Context("AWS EC2 EBS error messages").
-    Run()
-
-fmt.Println(result.Data.Device)   // "/dev/sdf"
-fmt.Println(result.Data.VolumeID) // "vol-0abc123"
-```
-
-Schema is generated from your struct via reflection — `json` tags for field names, `sense` tags for descriptions. Pointer fields are optional; value fields are required.
-
-Works with nested structs, slices, and all Go primitive types. Not just for testing — use it anywhere you need structure from messy text (logs, error messages, API responses, support tickets).
-
-### Usage tracking
-
-```go
-s := sense.NewSession(sense.Config{})
-defer s.Close()
-
-// ... run evals, compares, extracts ...
-
-fmt.Println(s.Usage())
-// sense: 15 calls, 18420 input tokens, 4210 output tokens
-```
-
-Token usage is tracked across all operations in a session using atomic counters — safe for concurrent use.
+| `SENSE_SKIP` | Set to `1` to skip all sense calls | unset |
 
 ## How It Works
 
