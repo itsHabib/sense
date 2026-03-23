@@ -2,11 +2,10 @@ package sense
 
 import (
 	"os"
-	"sync"
 	"time"
 )
 
-// Config holds global configuration for the sense package.
+// Config holds configuration for a Session.
 type Config struct {
 	// APIKey for Claude. Default: $ANTHROPIC_API_KEY
 	APIKey string
@@ -24,103 +23,81 @@ type Config struct {
 
 	// Cache for response caching. Default: nil (no caching)
 	Cache Cache
+
+	// Batch enables request batching. Default: nil (individual calls).
+	// When set, requests are collected and submitted as a single batch API call.
+	// 50% cost reduction, same caller interface.
+	Batch *BatchConfig
 }
 
-var (
-	mu           sync.RWMutex
-	globalConfig = Config{
-		Model:      "claude-sonnet-4-6",
-		Timeout:    30 * time.Second,
-		MaxRetries: 3,
-	}
-
-	clientOnce   sync.Once
-	globalClient caller
-)
-
-// Configure sets global defaults. Call in TestMain or init.
-// Fields are applied as overrides — only non-zero values are set.
-// Use -1 for Timeout or MaxRetries to explicitly set zero behavior.
-func Configure(cfg Config) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	if cfg.APIKey != "" {
-		globalConfig.APIKey = cfg.APIKey
-	}
-	if cfg.Model != "" {
-		globalConfig.Model = cfg.Model
-	}
-	if cfg.Timeout != 0 {
-		if cfg.Timeout < 0 {
-			globalConfig.Timeout = 0
-		} else {
-			globalConfig.Timeout = cfg.Timeout
-		}
-	}
-	if cfg.MaxRetries != 0 {
-		if cfg.MaxRetries < 0 {
-			globalConfig.MaxRetries = 0
-		} else {
-			globalConfig.MaxRetries = cfg.MaxRetries
-		}
-	}
-	if cfg.Cache != nil {
-		globalConfig.Cache = cfg.Cache
-	}
-
-	// Reset client so it picks up new config on next use.
-	clientOnce = sync.Once{}
-	globalClient = nil
+// Session holds a configured client for making evaluations.
+// Create one with NewSession and pass it to your tests.
+type Session struct {
+	client     caller
+	model      string
+	timeout    time.Duration
+	maxRetries int
+	cache      Cache
+	batcher    *batcher
 }
 
-func getAPIKey() string {
-	mu.RLock()
-	defer mu.RUnlock()
-
-	if globalConfig.APIKey != "" {
-		return globalConfig.APIKey
+// NewSession creates a Session from the given config.
+// If Batch is set, requests are collected and submitted as a single batch API call.
+func NewSession(cfg Config) *Session {
+	s := &Session{
+		model:      cfg.Model,
+		timeout:    cfg.Timeout,
+		maxRetries: cfg.MaxRetries,
+		cache:      cfg.Cache,
 	}
-	return os.Getenv("ANTHROPIC_API_KEY")
+
+	if s.model == "" {
+		s.model = "claude-sonnet-4-6"
+	}
+	if s.timeout == 0 {
+		s.timeout = 30 * time.Second
+	}
+	if cfg.Timeout < 0 {
+		s.timeout = 0
+	}
+	if s.maxRetries == 0 {
+		s.maxRetries = 3
+	}
+	if cfg.MaxRetries < 0 {
+		s.maxRetries = 0
+	}
+
+	apiKey := cfg.APIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+
+	if cfg.Batch != nil {
+		b := newBatcher(*cfg.Batch, apiKey)
+		s.batcher = b
+		s.client = &batchCaller{batcher: b}
+	} else {
+		s.client = newClaudeClient(apiKey, s.maxRetries)
+	}
+
+	return s
 }
 
-func getModel() string {
+// Close shuts down the session. If batching is enabled, it flushes
+// any remaining requests before returning.
+func (s *Session) Close() {
+	if s.batcher != nil {
+		s.batcher.close()
+	}
+}
+
+func (s *Session) getModel() string {
 	if m := os.Getenv("SENSE_MODEL"); m != "" {
 		return m
 	}
-	mu.RLock()
-	defer mu.RUnlock()
-	return globalConfig.Model
-}
-
-func getTimeout() time.Duration {
-	mu.RLock()
-	defer mu.RUnlock()
-	return globalConfig.Timeout
-}
-
-func getMaxRetries() int {
-	mu.RLock()
-	defer mu.RUnlock()
-	return globalConfig.MaxRetries
+	return s.model
 }
 
 func shouldSkip() bool {
 	return os.Getenv("SENSE_SKIP") == "1"
-}
-
-func getClient() caller {
-	clientOnce.Do(func() {
-		globalClient = newClaudeClient(getAPIKey())
-	})
-	return globalClient
-}
-
-// setClient replaces the global client. Used by tests to inject mocks.
-func setClient(c caller) {
-	mu.Lock()
-	defer mu.Unlock()
-	clientOnce = sync.Once{}
-	clientOnce.Do(func() {}) // mark as done so getClient won't overwrite
-	globalClient = c
 }

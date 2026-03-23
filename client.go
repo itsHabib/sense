@@ -14,16 +14,17 @@ import (
 )
 
 type claudeClient struct {
-	client anthropic.Client
+	client     anthropic.Client
+	maxRetries int
 }
 
-func newClaudeClient(apiKey string) *claudeClient {
+func newClaudeClient(apiKey string, maxRetries int) *claudeClient {
 	var opts []option.RequestOption
 	if apiKey != "" {
 		opts = append(opts, option.WithAPIKey(apiKey))
 	}
 	client := anthropic.NewClient(opts...)
-	return &claudeClient{client: client}
+	return &claudeClient{client: client, maxRetries: maxRetries}
 }
 
 var evalToolSchema = anthropic.ToolInputSchemaParam{
@@ -112,6 +113,12 @@ var compareToolSchema = anthropic.ToolInputSchemaParam{
 	Required: []string{"winner", "score_a", "score_b", "criteria", "reasoning"},
 }
 
+// caller is the internal interface for making LLM calls.
+// claudeClient implements this; tests can substitute a mock.
+type caller interface {
+	call(ctx context.Context, req *callRequest) (json.RawMessage, *Usage, error)
+}
+
 type callRequest struct {
 	systemPrompt string
 	userMessage  string
@@ -123,11 +130,6 @@ type callRequest struct {
 // call sends a tool_use request to Claude and returns the tool call arguments as raw JSON.
 // Retries on rate limits and server errors with exponential backoff.
 func (c *claudeClient) call(ctx context.Context, req *callRequest) (json.RawMessage, *Usage, error) {
-	model := req.model
-	if model == "" {
-		model = getModel()
-	}
-
 	tools := []anthropic.ToolUnionParam{{
 		OfTool: &anthropic.ToolParam{
 			Name:        req.toolName,
@@ -137,7 +139,7 @@ func (c *claudeClient) call(ctx context.Context, req *callRequest) (json.RawMess
 	}}
 
 	params := anthropic.MessageNewParams{
-		Model:     model,
+		Model:     req.model,
 		MaxTokens: 4096,
 		System: []anthropic.TextBlockParam{
 			{Text: req.systemPrompt},
@@ -149,7 +151,7 @@ func (c *claudeClient) call(ctx context.Context, req *callRequest) (json.RawMess
 		ToolChoice: anthropic.ToolChoiceParamOfTool(req.toolName),
 	}
 
-	maxRetries := getMaxRetries()
+	maxRetries := c.maxRetries
 	if maxRetries < 1 {
 		maxRetries = 1 // Always try at least once.
 	}

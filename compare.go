@@ -44,6 +44,7 @@ func (r *CompareResult) String() string {
 
 // CompareBuilder constructs and executes an A/B comparison.
 type CompareBuilder struct {
+	session  *Session
 	outputA  any
 	outputB  any
 	criteria []string
@@ -88,7 +89,7 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 	outputB := serializeOutput(b.outputB)
 	userMsg := buildCompareUserMessage(outputA, outputB, b.criteria, b.context)
 
-	timeout := getTimeout()
+	timeout := b.session.timeout
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -97,13 +98,17 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 
 	start := time.Now()
 
-	client := getClient()
-	raw, usage, err := client.call(ctx, &callRequest{
+	model := b.model
+	if model == "" {
+		model = b.session.getModel()
+	}
+
+	raw, usage, err := b.session.client.call(ctx, &callRequest{
 		systemPrompt: compareSystemPrompt,
 		userMessage:  userMsg,
 		toolName:     "submit_comparison",
 		toolSchema:   compareToolSchema,
-		model:        b.model,
+		model:        model,
 	})
 	if err != nil {
 		return nil, &Error{Op: "compare", Message: "api call failed", Err: err}
@@ -115,10 +120,7 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 	}
 
 	result.Duration = time.Since(start)
-	result.Model = b.model
-	if result.Model == "" {
-		result.Model = getModel()
-	}
+	result.Model = model
 	if usage != nil {
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
 	}

@@ -22,12 +22,13 @@ func (m *mockCaller) call(_ context.Context, req *callRequest) (json.RawMessage,
 	return m.response, m.usage, m.err
 }
 
-func withMock(t *testing.T, m *mockCaller) {
-	t.Helper()
-	setClient(m)
-	t.Cleanup(func() {
-		setClient(newClaudeClient(""))
-	})
+func testSession(m *mockCaller) *Session {
+	return &Session{
+		client:     m,
+		model:      "claude-sonnet-4-6",
+		timeout:    0, // no timeout in tests
+		maxRetries: 3,
+	}
 }
 
 // --- Eval with mock ---
@@ -43,9 +44,9 @@ func TestEval_AllPass(t *testing.T) {
 		}`),
 		usage: &Usage{InputTokens: 100, OutputTokens: 50},
 	}
-	withMock(t, mock)
+	s := testSession(mock)
 
-	result, err := Eval("test output").
+	result, err := s.Eval("test output").
 		Expect("is valid").
 		Judge()
 	if err != nil {
@@ -77,9 +78,9 @@ func TestEval_MixedResults(t *testing.T) {
 		}`),
 		usage: &Usage{InputTokens: 200, OutputTokens: 100},
 	}
-	withMock(t, mock)
+	s := testSession(mock)
 
-	result, err := Eval("some doc").
+	result, err := s.Eval("some doc").
 		Expect("has intro").
 		Expect("has conclusion").
 		Judge()
@@ -104,9 +105,9 @@ func TestEval_ClientError(t *testing.T) {
 	mock := &mockCaller{
 		err: errors.New("connection refused"),
 	}
-	withMock(t, mock)
+	s := testSession(mock)
 
-	_, err := Eval("test").
+	_, err := s.Eval("test").
 		Expect("something").
 		Judge()
 	if err == nil {
@@ -127,9 +128,9 @@ func TestEval_BadJSON(t *testing.T) {
 		response: json.RawMessage(`{not valid json}`),
 		usage:    &Usage{},
 	}
-	withMock(t, mock)
+	s := testSession(mock)
 
-	_, err := Eval("test").
+	_, err := s.Eval("test").
 		Expect("something").
 		Judge()
 	if err == nil {
@@ -157,9 +158,9 @@ func TestCompare_AWins(t *testing.T) {
 		}`),
 		usage: &Usage{InputTokens: 300, OutputTokens: 100},
 	}
-	withMock(t, mock)
+	s := testSession(mock)
 
-	result, err := Compare("good output", "bad output").
+	result, err := s.Compare("good output", "bad output").
 		Criteria("quality").
 		Judge()
 	if err != nil {
@@ -177,9 +178,9 @@ func TestCompare_ClientError(t *testing.T) {
 	mock := &mockCaller{
 		err: errors.New("timeout"),
 	}
-	withMock(t, mock)
+	s := testSession(mock)
 
-	_, err := Compare("a", "b").
+	_, err := s.Compare("a", "b").
 		Criteria("quality").
 		Judge()
 	if err == nil {
@@ -206,9 +207,9 @@ func TestAssert_PassesWithMock(t *testing.T) {
 		}`),
 		usage: &Usage{InputTokens: 50, OutputTokens: 50},
 	}
-	withMock(t, mock)
+	s := testSession(mock)
 
-	Assert(t, "test output").
+	s.Assert(t, "test output").
 		Expect("is valid").
 		Run()
 }
@@ -222,9 +223,9 @@ func TestRequire_PassesWithMock(t *testing.T) {
 		}`),
 		usage: &Usage{InputTokens: 50, OutputTokens: 50},
 	}
-	withMock(t, mock)
+	s := testSession(mock)
 
-	Require(t, "test output").
+	s.Require(t, "test output").
 		Expect("is valid").
 		Run()
 }
@@ -236,9 +237,9 @@ func TestEval_PromptIncludesExpectations(t *testing.T) {
 		response: json.RawMessage(`{"pass": true, "score": 1.0, "checks": []}`),
 		usage:    &Usage{},
 	}
-	withMock(t, mock)
+	s := testSession(mock)
 
-	_, _ = Eval("my output").
+	_, _ = s.Eval("my output").
 		Expect("first thing").
 		Expect("second thing").
 		Context("background info").
@@ -264,9 +265,9 @@ func TestCompare_PromptIncludesBothOutputs(t *testing.T) {
 		response: json.RawMessage(`{"winner": "tie", "score_a": 0.5, "score_b": 0.5, "criteria": [], "reasoning": "equal"}`),
 		usage:    &Usage{},
 	}
-	withMock(t, mock)
+	s := testSession(mock)
 
-	_, _ = Compare("output A here", "output B here").
+	_, _ = s.Compare("output A here", "output B here").
 		Criteria("clarity").
 		Context("comparing two drafts").
 		Judge()

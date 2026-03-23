@@ -4,16 +4,33 @@ package sense_test
 
 import (
 	"errors"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/itsHabib/sense"
 )
 
+var s *sense.Session
+
+func TestMain(m *testing.M) {
+	s = sense.NewSession(sense.Config{
+		Batch: &sense.BatchConfig{
+			MaxSize: 50,
+			MaxWait: 2 * time.Second,
+		},
+	})
+	code := m.Run()
+	s.Close()
+	os.Exit(code)
+}
+
 // --- Assert correctness ---
 
 func TestAssert_PassesOnStructuredReport(t *testing.T) {
+	t.Parallel()
 
-	sense.Assert(t, `
+	s.Assert(t,`
 # Quarterly Report
 
 ## Summary
@@ -38,8 +55,9 @@ Revenue grew 15% year-over-year to $4.2M. Customer churn decreased from 8% to 5%
 }
 
 func TestAssert_PassesOnValidGoCode(t *testing.T) {
+	t.Parallel()
 
-	sense.Assert(t, `
+	s.Assert(t,`
 package main
 
 import (
@@ -69,8 +87,9 @@ func main() {
 // --- Eval should-fail ---
 
 func TestEval_FailsOnPlainText(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Eval("This is a plain paragraph with no structure whatsoever.").
+	result, err := s.Eval("This is a plain paragraph with no structure whatsoever.").
 		Expect("contains bullet points").
 		Expect("has at least 3 sections with headings").
 		Judge()
@@ -87,8 +106,9 @@ func TestEval_FailsOnPlainText(t *testing.T) {
 }
 
 func TestEval_FailsOnFactualErrors(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Eval("The capital of France is Berlin. Python is a compiled language.").
+	result, err := s.Eval("The capital of France is Berlin. Python is a compiled language.").
 		Expect("all factual claims are correct").
 		Judge()
 	if err != nil {
@@ -111,8 +131,9 @@ func TestEval_FailsOnFactualErrors(t *testing.T) {
 // --- Eval score accuracy ---
 
 func TestEval_HighScoreForGoodOutput(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Eval(`
+	result, err := s.Eval(`
 func Add(a, b int) int {
 	return a + b
 }
@@ -150,8 +171,9 @@ func TestAdd(t *testing.T) {
 }
 
 func TestEval_LowScoreForBadOutput(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Eval("idk lol").
+	result, err := s.Eval("idk lol").
 		Expect("is a well-structured technical document").
 		Expect("includes diagrams or code examples").
 		Expect("has a table of contents").
@@ -170,8 +192,9 @@ func TestEval_LowScoreForBadOutput(t *testing.T) {
 }
 
 func TestEval_MixedPassFail(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Eval(`
+	result, err := s.Eval(`
 # API Design
 
 The API uses REST over HTTP with JSON payloads.
@@ -208,8 +231,9 @@ POST /users - create user
 // --- Eval confidence ---
 
 func TestEval_HighConfidenceOnObviousPass(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Eval("Hello, world!").
+	result, err := s.Eval("Hello, world!").
 		Expect("contains the word hello").
 		Judge()
 	if err != nil {
@@ -225,8 +249,9 @@ func TestEval_HighConfidenceOnObviousPass(t *testing.T) {
 }
 
 func TestEval_HighConfidenceOnObviousFail(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Eval("The sky is blue.").
+	result, err := s.Eval("The sky is blue.").
 		Expect("discusses quantum mechanics").
 		Judge()
 	if err != nil {
@@ -244,8 +269,9 @@ func TestEval_HighConfidenceOnObviousFail(t *testing.T) {
 // --- Compare ---
 
 func TestCompare_PicksObviousWinner(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Compare(
+	result, err := s.Compare(
 		`Go is a statically typed, compiled programming language designed at Google
 by Robert Griesemer, Rob Pike, and Ken Thompson. It features garbage collection,
 structural typing, and CSP-style concurrency with goroutines and channels.`,
@@ -270,8 +296,9 @@ structural typing, and CSP-style concurrency with goroutines and channels.`,
 }
 
 func TestCompare_CloseScoresOnSimilarOutputs(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Compare(
+	result, err := s.Compare(
 		"Go is a compiled language with garbage collection.",
 		"Go is a garbage-collected, compiled programming language.",
 	).
@@ -289,8 +316,9 @@ func TestCompare_CloseScoresOnSimilarOutputs(t *testing.T) {
 }
 
 func TestCompare_SplitCriteria(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Compare(
+	result, err := s.Compare(
 		"The HTTP 404 status code indicates that the server cannot find the requested resource. The URI is valid but the resource itself does not exist.",
 		"Oops! Looks like we couldn't find what you're looking for. The page might have been moved or deleted. Try going back to the homepage!",
 	).
@@ -313,6 +341,7 @@ func TestCompare_SplitCriteria(t *testing.T) {
 // --- Struct input ---
 
 func TestEval_StructInput(t *testing.T) {
+	t.Parallel()
 
 	type APIResponse struct {
 		Status  string `json:"status"`
@@ -326,7 +355,7 @@ func TestEval_StructInput(t *testing.T) {
 		Message: "rate limit exceeded, retry after 30 seconds",
 	}
 
-	result, err := sense.Eval(resp).
+	result, err := s.Eval(resp).
 		Expect("indicates a rate limiting error").
 		Expect("includes retry information").
 		Judge()
@@ -342,7 +371,7 @@ func TestEval_StructInput(t *testing.T) {
 // --- Error handling (no API) ---
 
 func TestEval_NoExpectationsReturnsError(t *testing.T) {
-	_, err := sense.Eval("anything").Judge()
+	_, err := s.Eval("anything").Judge()
 	if err == nil {
 		t.Fatal("expected error when no expectations provided")
 	}
@@ -352,7 +381,7 @@ func TestEval_NoExpectationsReturnsError(t *testing.T) {
 }
 
 func TestCompare_NoCriteriaReturnsError(t *testing.T) {
-	_, err := sense.Compare("a", "b").Judge()
+	_, err := s.Compare("a", "b").Judge()
 	if err == nil {
 		t.Fatal("expected error when no criteria provided")
 	}
@@ -365,14 +394,14 @@ func TestCompare_NoCriteriaReturnsError(t *testing.T) {
 
 func TestSkipMode_Assert(t *testing.T) {
 	t.Setenv("SENSE_SKIP", "1")
-	sense.Assert(t, "anything").
+	s.Assert(t,"anything").
 		Expect("impossible expectation").
 		Run()
 }
 
 func TestSkipMode_Require(t *testing.T) {
 	t.Setenv("SENSE_SKIP", "1")
-	sense.Require(t, "anything").
+	s.Require(t,"anything").
 		Expect("impossible expectation").
 		Run()
 }
@@ -380,7 +409,7 @@ func TestSkipMode_Require(t *testing.T) {
 func TestSkipMode_EvalReturnsPass(t *testing.T) {
 	t.Setenv("SENSE_SKIP", "1")
 
-	result, err := sense.Eval("anything").
+	result, err := s.Eval("anything").
 		Expect("something").
 		Judge()
 	if err != nil {
@@ -397,7 +426,7 @@ func TestSkipMode_EvalReturnsPass(t *testing.T) {
 func TestSkipMode_CompareReturnsTie(t *testing.T) {
 	t.Setenv("SENSE_SKIP", "1")
 
-	result, err := sense.Compare("a", "b").
+	result, err := s.Compare("a", "b").
 		Criteria("anything").
 		Judge()
 	if err != nil {
@@ -411,8 +440,9 @@ func TestSkipMode_CompareReturnsTie(t *testing.T) {
 // --- Require ---
 
 func TestRequire_PassesOnValidInput(t *testing.T) {
+	t.Parallel()
 
-	sense.Require(t, "Hello, world!").
+	s.Require(t,"Hello, world!").
 		Expect("contains a greeting").
 		Run()
 }
@@ -420,8 +450,9 @@ func TestRequire_PassesOnValidInput(t *testing.T) {
 // --- Metadata tracking ---
 
 func TestEval_TracksMetadata(t *testing.T) {
+	t.Parallel()
 
-	result, err := sense.Eval("test input").
+	result, err := s.Eval("test input").
 		Expect("is not empty").
 		Judge()
 	if err != nil {

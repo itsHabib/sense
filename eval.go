@@ -75,6 +75,7 @@ func (r *EvalResult) String() string {
 
 // EvalBuilder constructs and executes an evaluation.
 type EvalBuilder struct {
+	session      *Session
 	output       any
 	expectations []string
 	context      string
@@ -121,7 +122,7 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 	outputStr := serializeOutput(b.output)
 	userMsg := buildEvalUserMessage(outputStr, b.expectations, b.context)
 
-	timeout := getTimeout()
+	timeout := b.session.timeout
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -130,13 +131,17 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 
 	start := time.Now()
 
-	client := getClient()
-	raw, usage, err := client.call(ctx, &callRequest{
+	model := b.model
+	if model == "" {
+		model = b.session.getModel()
+	}
+
+	raw, usage, err := b.session.client.call(ctx, &callRequest{
 		systemPrompt: evalSystemPrompt,
 		userMessage:  userMsg,
 		toolName:     "submit_evaluation",
 		toolSchema:   evalToolSchema,
-		model:        b.model,
+		model:        model,
 	})
 	if err != nil {
 		return nil, &Error{Op: "eval", Message: "api call failed", Err: err}
@@ -148,10 +153,7 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 	}
 
 	result.Duration = time.Since(start)
-	result.Model = b.model
-	if result.Model == "" {
-		result.Model = getModel()
-	}
+	result.Model = model
 	if usage != nil {
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
 	}
