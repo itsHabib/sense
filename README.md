@@ -1,25 +1,28 @@
 # Sense
 
-Make sense of non-deterministic output. Evaluate, compare, and extract structured data from text using Claude.
+Make sense of non-deterministic output. Extract structured data from text and evaluate output quality using Claude.
 
 ```go
 s := sense.NewSession(sense.Config{})
 defer s.Close()
 
-// Judge agent output against expectations
-s.Assert(t, doc).
-    Expect("covers all sections from the brief").
-    Expect("includes actionable recommendations").
-    Run()
-
-// Parse unstructured text into typed structs
+// Extract: unstructured text → typed struct
 result, err := sense.Extract[MountError](s,
     "device /dev/sdf already mounted with vol-0abc123").Run()
 fmt.Println(result.Data.Device)   // "/dev/sdf"
 fmt.Println(result.Data.VolumeID) // "vol-0abc123"
+
+// Judge: output → pass/fail with evidence
+s.Assert(t, doc).
+    Expect("covers all sections from the brief").
+    Expect("includes actionable recommendations").
+    Run()
 ```
 
 Sense uses the [Anthropic API](https://docs.anthropic.com/en/docs) (Claude) with forced `tool_use` for structured responses — no prompt engineering, no JSON parsing on your end. Requires an Anthropic API key.
+
+- **Extract** — parse unstructured text into typed Go structs. Logs, error messages, support tickets, API responses — define a struct, get structured data back.
+- **Judge** — evaluate non-deterministic output against expectations. Assert in tests, eval programmatically, or A/B compare two outputs.
 
 ## Install
 
@@ -31,14 +34,49 @@ go get github.com/itsHabib/sense
 export ANTHROPIC_API_KEY=...
 ```
 
-## Usage
+## Extract — structure from chaos
 
-Create a session once, reuse it everywhere:
+Define a struct. Get structured data back. Works with any text.
 
 ```go
-s := sense.NewSession(sense.Config{})
-defer s.Close()
+type MountError struct {
+    Device   string `json:"device" sense:"The device path"`
+    VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
+    Message  string `json:"message"`
+}
+
+result, err := sense.Extract[MountError](s,
+    "device /dev/sdf already mounted with vol-0abc123").
+    Context("AWS EC2 EBS error messages").
+    Run()
+
+fmt.Println(result.Data.Device)   // "/dev/sdf"
+fmt.Println(result.Data.VolumeID) // "vol-0abc123"
 ```
+
+Schema is generated from your struct via reflection — `json` tags for field names, `sense` tags for descriptions. Pointer fields are optional; value fields are required.
+
+Works with nested structs, slices, and all Go primitive types.
+
+### Use cases
+
+Extract isn't just for tests. Use it anywhere you need structure from messy text:
+
+```go
+// Parse log lines into typed events
+event, _ := sense.Extract[DeployEvent](s, logLine).
+    Context("Kubernetes deployment logs").Run()
+
+// Classify support tickets
+ticket, _ := sense.Extract[TicketInfo](s, emailBody).
+    Context("Customer support emails for a SaaS product").Run()
+
+// Normalize inconsistent API responses
+order, _ := sense.Extract[Order](s, thirdPartyJSON).
+    Context("Legacy vendor API, format varies by region").Run()
+```
+
+## Judge — evaluate non-deterministic output
 
 ### Assert — test assertion, continues on failure
 
@@ -74,28 +112,6 @@ When a check fails, you get structured feedback — what passed, what failed, wh
             no error handling logic, no REST API context
           confidence: 0.99
 ```
-
-### Extract — parse unstructured text into Go structs
-
-```go
-type MountError struct {
-    Device   string `json:"device" sense:"The device path"`
-    VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
-    Message  string `json:"message"`
-}
-
-result, err := sense.Extract[MountError](s,
-    "device /dev/sdf already mounted with vol-0abc123").
-    Context("AWS EC2 EBS error messages").
-    Run()
-
-fmt.Println(result.Data.Device)   // "/dev/sdf"
-fmt.Println(result.Data.VolumeID) // "vol-0abc123"
-```
-
-Schema is generated from your struct via reflection — `json` tags for field names, `sense` tags for descriptions. Pointer fields are optional; value fields are required.
-
-Works with nested structs, slices, and all Go primitive types. Not just for testing — use it anywhere you need structure from messy text (logs, error messages, API responses, support tickets).
 
 ### Require — test assertion, stops on failure
 
@@ -139,16 +155,9 @@ fmt.Println(cmp.ScoreB)     // 0.10
 fmt.Println(cmp.Reasoning)  // "Output A is significantly better..."
 ```
 
-### Usage tracking
+## Session
 
-```go
-fmt.Println(s.Usage())
-// sense: 15 calls, 18420 input tokens, 4210 output tokens
-```
-
-Token usage is tracked across all operations using atomic counters — safe for concurrent use.
-
-## Configuration
+Create a session once, reuse it everywhere:
 
 ```go
 s := sense.NewSession(sense.Config{
@@ -159,6 +168,30 @@ s := sense.NewSession(sense.Config{
 })
 defer s.Close()
 ```
+
+### Usage tracking
+
+```go
+fmt.Println(s.Usage())
+// sense: 15 calls, 18420 input tokens, 4210 output tokens
+```
+
+Token usage is tracked across all operations using atomic counters — safe for concurrent use.
+
+## Batching
+
+Enable batching for 50% cost reduction. Requests are collected and submitted as a single Anthropic Batch API call:
+
+```go
+s = sense.NewSession(sense.Config{
+    Batch: &sense.BatchConfig{
+        MaxSize: 50,                   // flush after 50 requests
+        MaxWait: 2 * time.Second,      // or after 2s, whichever first
+    },
+})
+```
+
+**Note:** Batching trades latency for cost. The Batch API processes requests asynchronously — it can take minutes to hours depending on load. Use it for large test suites where 50% cost savings matter more than speed.
 
 ## Running Tests
 
@@ -182,22 +215,7 @@ Skip all sense calls when you don't have an API key:
 SENSE_SKIP=1 go test ./...
 ```
 
-All `Assert`, `Require`, `Eval`, and `Extract` calls become no-ops that pass immediately.
-
-## Batching
-
-Enable batching for 50% cost reduction. Requests are collected and submitted as a single Anthropic Batch API call:
-
-```go
-s = sense.NewSession(sense.Config{
-    Batch: &sense.BatchConfig{
-        MaxSize: 50,                   // flush after 50 requests
-        MaxWait: 2 * time.Second,      // or after 2s, whichever first
-    },
-})
-```
-
-**Note:** Batching trades latency for cost. The Batch API processes requests asynchronously — it can take minutes to hours depending on load. Use it for large test suites where 50% cost savings matter more than speed.
+All `Assert`, `Require`, `Eval`, `Extract`, and `Compare` calls become no-ops that pass immediately.
 
 ## Environment Variables
 
@@ -209,7 +227,7 @@ s = sense.NewSession(sense.Config{
 
 ## How It Works
 
-1. Your expectations (or struct schema) become a prompt
+1. Your struct schema (Extract) or expectations (Judge) become a prompt
 2. Claude is forced to call a structured tool via `tool_choice`
 3. The tool's input schema enforces the output format server-side
 4. Sense unmarshals the tool call result into typed Go structs

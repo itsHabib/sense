@@ -1,19 +1,25 @@
-// Package sense makes sense of non-deterministic output.
+// Package sense provides two tools for working with unstructured text,
+// powered by Claude.
 //
-// Evaluate, compare, and extract structured data from text using Claude
-// as the judge. Designed for testing agents but works anywhere you need
-// to judge or parse unstructured output.
+// Extract parses messy text into typed Go structs — logs, error messages,
+// support tickets, API responses. Define a struct, get structured data back.
+//
+// Judge evaluates non-deterministic output against expectations. Assert in
+// tests, eval programmatically, A/B compare two outputs.
+//
+// Both use the Anthropic API with forced tool_use for structured responses.
+// No prompt engineering, no JSON parsing — the schema is enforced server-side.
 //
 //	s := sense.NewSession(sense.Config{})
 //	defer s.Close()
 //
-//	// Test assertions
+//	// Extract: unstructured text → typed struct
+//	result, err := sense.Extract[MountError](s, "device /dev/sdf already mounted").Run()
+//
+//	// Judge: output → pass/fail with evidence
 //	s.Assert(t, doc).
 //	    Expect("covers all sections from the brief").
 //	    Run()
-//
-//	// Structured extraction
-//	result, err := sense.Extract[MountError](s, "device /dev/sdf already mounted").Run()
 package sense
 
 import "testing"
