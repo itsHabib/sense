@@ -82,6 +82,25 @@ func fieldName(f *reflect.StructField) string {
 	return name
 }
 
+// schemaForValue generates a JSON schema from a concrete value (must be a pointer
+// to a struct) and caches it. This is the runtime counterpart to the generic
+// schemaFor[T](), used by the s.Extract(text, &dest) method.
+func schemaForValue(dest any) anthropic.ToolInputSchemaParam {
+	t := reflect.TypeOf(dest)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	if cached, ok := schemaCache.Load(t); ok {
+		schema, _ := cached.(anthropic.ToolInputSchemaParam)
+		return schema
+	}
+
+	schema := buildSchema(t)
+	schemaCache.Store(t, schema)
+	return schema
+}
+
 // typeSchema returns the JSON schema representation for a Go type.
 func typeSchema(t reflect.Type) map[string]any {
 	switch t.Kind() {

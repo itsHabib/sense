@@ -14,7 +14,8 @@
 //	defer s.Close()
 //
 //	// Extract: unstructured text → typed struct
-//	result, err := sense.Extract[MountError](s, "device /dev/sdf already mounted").Run()
+//	var m MountError
+//	s.Extract("device /dev/sdf already mounted", &m).Run()
 //
 //	// Judge: output → pass/fail with evidence
 //	s.Assert(t, doc).

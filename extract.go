@@ -26,6 +26,9 @@ type ExtractBuilder[T any] struct {
 }
 
 // Extract creates a builder that extracts structured data from text into type T.
+// This is the generic variant with compile-time type safety. For the method
+// variant that works with the [Extractor] interface, use [Session.Extract].
+//
 // T must be a struct with exported fields. Use json tags for field names
 // and sense tags for descriptions:
 //

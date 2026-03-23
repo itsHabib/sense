@@ -7,10 +7,10 @@ s := sense.NewSession(sense.Config{})
 defer s.Close()
 
 // Extract: unstructured text → typed struct
-result, err := sense.Extract[MountError](s,
-    "device /dev/sdf already mounted with vol-0abc123").Run()
-fmt.Println(result.Data.Device)   // "/dev/sdf"
-fmt.Println(result.Data.VolumeID) // "vol-0abc123"
+var m MountError
+s.Extract("device /dev/sdf already mounted with vol-0abc123", &m).Run()
+fmt.Println(m.Device)   // "/dev/sdf"
+fmt.Println(m.VolumeID) // "vol-0abc123"
 
 // Judge: output → pass/fail with evidence
 s.Assert(t, doc).
@@ -45,18 +45,25 @@ type MountError struct {
     Message  string `json:"message"`
 }
 
-result, err := sense.Extract[MountError](s,
-    "device /dev/sdf already mounted with vol-0abc123").
+var m MountError
+_, err := s.Extract("device /dev/sdf already mounted with vol-0abc123", &m).
     Context("AWS EC2 EBS error messages").
     Run()
 
-fmt.Println(result.Data.Device)   // "/dev/sdf"
-fmt.Println(result.Data.VolumeID) // "vol-0abc123"
+fmt.Println(m.Device)   // "/dev/sdf"
+fmt.Println(m.VolumeID) // "vol-0abc123"
 ```
 
-Schema is generated from your struct via reflection — `json` tags for field names, `sense` tags for descriptions. Pointer fields are optional; value fields are required.
+Pass a pointer to a struct — data is written directly into it, like `json.Unmarshal`. Schema is generated from your struct via reflection — `json` tags for field names, `sense` tags for descriptions. Pointer fields are optional; value fields are required.
 
 Works with nested structs, slices, and all Go primitive types.
+
+A generic function is also available for callers who prefer compile-time type safety:
+
+```go
+result, err := sense.Extract[MountError](s, "device /dev/sdf already mounted with vol-0abc123").Run()
+fmt.Println(result.Data.Device)   // "/dev/sdf"
+```
 
 ### Use cases
 
@@ -64,16 +71,16 @@ Extract isn't just for tests. Use it anywhere you need structure from messy text
 
 ```go
 // Parse log lines into typed events
-event, _ := sense.Extract[DeployEvent](s, logLine).
-    Context("Kubernetes deployment logs").Run()
+var event DeployEvent
+s.Extract(logLine, &event).Context("Kubernetes deployment logs").Run()
 
 // Classify support tickets
-ticket, _ := sense.Extract[TicketInfo](s, emailBody).
-    Context("Customer support emails for a SaaS product").Run()
+var ticket TicketInfo
+s.Extract(emailBody, &ticket).Context("Customer support emails for a SaaS product").Run()
 
 // Normalize inconsistent API responses
-order, _ := sense.Extract[Order](s, thirdPartyJSON).
-    Context("Legacy vendor API, format varies by region").Run()
+var order Order
+s.Extract(thirdPartyJSON, &order).Context("Legacy vendor API, format varies by region").Run()
 ```
 
 ## Judge — evaluate non-deterministic output
@@ -216,6 +223,32 @@ SENSE_SKIP=1 go test ./...
 ```
 
 All `Assert`, `Require`, `Eval`, `Extract`, and `Compare` calls become no-ops that pass immediately.
+
+## Interfaces
+
+Sense provides two interfaces for decoupling your code from the concrete Session:
+
+```go
+// For code that judges output
+func AnalyzeReport(s sense.Evaluator, doc string) (bool, error) {
+    result, err := s.Eval(doc).
+        Expect("has executive summary").
+        Judge()
+    if err != nil {
+        return false, err
+    }
+    return result.Pass, nil
+}
+
+// For code that extracts structure
+func ParseTicket(s sense.Extractor, raw string) (*Ticket, error) {
+    var t Ticket
+    _, err := s.Extract(raw, &t).Run()
+    return &t, err
+}
+```
+
+`*Session` satisfies both interfaces. Accept `Evaluator` or `Extractor` in your function signatures to make your code testable without the Claude API.
 
 ## Environment Variables
 

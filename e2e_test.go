@@ -4,6 +4,7 @@ package sense_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 
@@ -762,4 +763,203 @@ func TestExtract_NginxAccessLog(t *testing.T) {
 		result.Data.IP, result.Data.Method, result.Data.Path,
 		result.Data.Status, result.Data.BodyBytes, result.Data.Referrer,
 		result.Data.UserAgent, result.Data.Latency)
+}
+
+// --- ExtractInto (method-style) ---
+
+func TestExtractInto_AWSError(t *testing.T) {
+	t.Parallel()
+
+	type mountErr struct {
+		Device   string `json:"device" sense:"The device path e.g. /dev/sdf"`
+		VolumeID string `json:"volume_id" sense:"The EBS volume ID e.g. vol-abc123"`
+		Message  string `json:"message" sense:"The error message"`
+	}
+
+	var m mountErr
+	result, err := s.Extract(
+		"attach volume: device /dev/sdf is already in use by vol-0abc123def456", &m).
+		Context("AWS EC2 EBS error messages").
+		Run()
+	if err != nil {
+		t.Fatalf("extract error: %v", err)
+	}
+
+	if m.Device == "" {
+		t.Error("expected device to be extracted")
+	}
+	if m.VolumeID == "" {
+		t.Error("expected volume ID to be extracted")
+	}
+	if result.TokensUsed == 0 {
+		t.Error("expected non-zero token usage")
+	}
+	t.Logf("extracted: device=%s volume=%s message=%q (tokens: %d)",
+		m.Device, m.VolumeID, m.Message, result.TokensUsed)
+}
+
+func TestExtractInto_LogLine(t *testing.T) {
+	t.Parallel()
+
+	type source struct {
+		File string `json:"file"`
+		Line int    `json:"line"`
+	}
+	type logEntry struct {
+		Level   string `json:"level"`
+		Message string `json:"message"`
+		Source  source `json:"source"`
+	}
+
+	var entry logEntry
+	_, err := s.Extract(
+		`2024-03-15 14:22:01 ERROR [server.go:142] connection pool exhausted: max 50 connections reached`,
+		&entry).Run()
+	if err != nil {
+		t.Fatalf("extract error: %v", err)
+	}
+
+	if entry.Level == "" {
+		t.Error("expected level to be extracted")
+	}
+	if entry.Source.File == "" {
+		t.Error("expected source file to be extracted")
+	}
+	if entry.Source.Line == 0 {
+		t.Error("expected source line to be extracted")
+	}
+	t.Logf("extracted: level=%s message=%q source=%s:%d",
+		entry.Level, entry.Message, entry.Source.File, entry.Source.Line)
+}
+
+func TestExtractInto_KubernetesEvent(t *testing.T) {
+	t.Parallel()
+
+	type k8sEvent struct {
+		Kind      string   `json:"kind" sense:"Resource kind (Pod, Deployment, Service, etc)"`
+		Name      string   `json:"name" sense:"Resource name"`
+		Namespace string   `json:"namespace"`
+		Reason    string   `json:"reason" sense:"Event reason (CrashLoopBackOff, OOMKilled, etc)"`
+		Message   string   `json:"message"`
+		Restarts  *int     `json:"restarts" sense:"Container restart count if mentioned"`
+		ExitCode  *int     `json:"exit_code" sense:"Container exit code if mentioned"`
+		Images    []string `json:"images" sense:"Container image names if mentioned"`
+	}
+
+	var event k8sEvent
+	_, err := s.Extract(
+		`Warning  BackOff  pod/api-server-7b4d5f6-x2k9p  namespace=production  Back-off restarting failed container api-server in pod api-server-7b4d5f6-x2k9p_production(abc123): container "api-server" (image: registry.io/api:v2.3.1) exited with code 137, restart count 14`,
+		&event).
+		Context("Kubernetes event log output from kubectl get events").
+		Run()
+	if err != nil {
+		t.Fatalf("extract error: %v", err)
+	}
+
+	if event.Kind == "" {
+		t.Error("expected kind to be extracted")
+	}
+	if event.Name == "" {
+		t.Error("expected name to be extracted")
+	}
+	if event.Namespace == "" {
+		t.Error("expected namespace to be extracted")
+	}
+	if event.Restarts == nil {
+		t.Error("expected restart count to be extracted")
+	} else if *event.Restarts != 14 {
+		t.Errorf("expected 14 restarts, got %d", *event.Restarts)
+	}
+	if event.ExitCode == nil {
+		t.Error("expected exit code to be extracted")
+	} else if *event.ExitCode != 137 {
+		t.Errorf("expected exit code 137, got %d", *event.ExitCode)
+	}
+	t.Logf("extracted: kind=%s name=%s ns=%s reason=%s restarts=%v exit=%v images=%v",
+		event.Kind, event.Name, event.Namespace,
+		event.Reason, event.Restarts, event.ExitCode, event.Images)
+}
+
+func TestExtractInto_SkipMode(t *testing.T) {
+	t.Setenv("SENSE_SKIP", "1")
+
+	type simple struct {
+		Name string `json:"name"`
+	}
+
+	var v simple
+	v.Name = "untouched"
+	result, err := s.Extract("anything", &v).Run()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result in skip mode")
+	}
+	if v.Name != "untouched" {
+		t.Errorf("expected dest untouched in skip mode, got %s", v.Name)
+	}
+}
+
+func TestExtractInto_ValidationErrors(t *testing.T) {
+	_, err := s.Extract("text", nil).Run()
+	if err == nil {
+		t.Error("expected error for nil dest")
+	}
+
+	_, err = s.Extract("text", "not a pointer").Run()
+	if err == nil {
+		t.Error("expected error for non-pointer dest")
+	}
+
+	var str string
+	_, err = s.Extract("text", &str).Run()
+	if err == nil {
+		t.Error("expected error for pointer to non-struct")
+	}
+}
+
+// --- Evaluator / Extractor interfaces ---
+
+func TestEvaluatorInterface(t *testing.T) {
+	// Verify Session satisfies Evaluator at runtime.
+	var e sense.Evaluator = s
+	result, err := e.Eval("Hello, world!").
+		Expect("contains a greeting").
+		Judge()
+	if err != nil {
+		t.Fatalf("eval error: %v", err)
+	}
+	if !result.Pass {
+		t.Error("expected pass via Evaluator interface")
+	}
+}
+
+func TestExtractorInterface(t *testing.T) {
+	// Verify Session satisfies Extractor at runtime.
+	var e sense.Extractor = s
+
+	type greeting struct {
+		Word string `json:"word" sense:"The greeting word"`
+	}
+
+	var g greeting
+	_, err := e.Extract("Hello, world!", &g).Run()
+	if err != nil {
+		t.Fatalf("extract error: %v", err)
+	}
+	if g.Word == "" {
+		t.Error("expected word to be extracted via Extractor interface")
+	}
+	t.Logf("extracted via interface: word=%s", g.Word)
+}
+
+// Verify both interfaces can be composed.
+func TestBothInterfaces(_ *testing.T) {
+	type both interface {
+		sense.Evaluator
+		sense.Extractor
+	}
+	var b both = s
+	_ = fmt.Sprintf("%T", b) // use b to avoid unused var
 }
