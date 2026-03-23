@@ -266,3 +266,17 @@ func ParseTicket(s sense.Extractor, raw string) (*Ticket, error) {
 4. Sense unmarshals the tool call result into typed Go structs
 
 No prompt engineering. No JSON parsing. No "hope the model returns valid output." The schema is enforced server-side.
+
+## Roadmap
+
+- [ ] **Deterministic checks** — mix `Check(sense.ValidJSON())` with LLM-judged `Expect()` in the same assertion. Deterministic checks run first; if any fail, skip the LLM call. Free, fast, saves money.
+- [ ] **Extract validation** — `Validate(func(T) error)` on extracted structs. Catch hallucinated values (negative totals, impossible dates) without another LLM call.
+- [ ] **File cache** — cache responses to disk. Identical prompts during iterative development hit the cache instead of the API.
+- [ ] **Prompt caching** — use Anthropic's `cache_control` to reduce cost on repeated system prompts within a session.
+- [ ] **Snapshots** — save eval results to disk, detect regressions when prompts change. `SENSE_UPDATE_SNAPSHOTS=1` to update.
+- [ ] **CI reporter** — JUnit XML output and GitHub Actions annotations so eval results show up in your pipeline.
+- [ ] **Multi-judge consensus** — fan out to N models, require agreement for a pass. Reduces false positives from single-model bias.
+- [ ] **ExtractSlice[T]** — extract `[]T` from text with multiple items (invoices, log batches, entity lists).
+- [ ] **Cost budget** — `MaxCost: sense.Dollars(0.50)` to cap session spend. Prevents runaway costs in CI.
+
+See [docs/NEXT.md](docs/NEXT.md) for details.
