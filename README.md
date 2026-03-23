@@ -61,7 +61,7 @@ Works with nested structs, slices, and all Go primitive types.
 A generic function is also available for callers who prefer compile-time type safety:
 
 ```go
-result, err := sense.Extract[MountError](s, "device /dev/sdf already mounted with vol-0abc123").Run()
+result, err := sense.Extract[MountError]("device /dev/sdf already mounted with vol-0abc123").Run()
 fmt.Println(result.Data.Device)   // "/dev/sdf"
 ```
 
@@ -186,8 +186,8 @@ s := sense.New()
 var m MountError
 s.Extract("device /dev/sdf already mounted", &m).Run()
 
-// Generic version
-result, err := sense.Extract[MountError](s, logLine).Run()
+// Generic version (uses default session)
+result, err := sense.Extract[MountError](logLine).Run()
 ```
 
 ### Functional options

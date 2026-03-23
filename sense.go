@@ -27,6 +27,9 @@
 //
 // # Extract — structured data from text
 //
+//	result, err := sense.Extract[MountError]("device /dev/sdf already mounted").Run()
+//
+//	// Or with an explicit session for usage tracking:
 //	s := sense.New()
 //	var m MountError
 //	s.Extract("device /dev/sdf already mounted", &m).Run()

@@ -79,7 +79,7 @@ type Order struct {
     Items      int     `json:"items" sense:"Number of line items"`
 }
 
-result, err := sense.Extract[Order](s, rawEmail).
+result, err := sense.Extract[Order](rawEmail).
     Validate(func(o Order) error {
         if o.Total < 0 {
             return errors.New("negative total")

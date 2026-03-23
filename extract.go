@@ -25,9 +25,8 @@ type ExtractBuilder[T any] struct {
 	schema  anthropic.ToolInputSchemaParam
 }
 
-// Extract creates a builder that extracts structured data from text into type T.
-// This is the generic variant with compile-time type safety. For the method
-// variant that works with the [Extractor] interface, use [Session.Extract].
+// Extract creates a builder that extracts structured data from text into type T
+// using the default session. For an explicit session, use [Session.Extract].
 //
 // T must be a struct with exported fields. Use json tags for field names
 // and sense tags for descriptions:
@@ -37,8 +36,12 @@ type ExtractBuilder[T any] struct {
 //	    VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
 //	}
 //
-//	result, err := sense.Extract[MountError](s, "device /dev/sdf already mounted with vol-123").Run()
-func Extract[T any](s *Session, text string) *ExtractBuilder[T] {
+//	result, err := sense.Extract[MountError]("device /dev/sdf already mounted with vol-123").Run()
+func Extract[T any](text string) *ExtractBuilder[T] {
+	return newExtractBuilder[T](getDefault(), text)
+}
+
+func newExtractBuilder[T any](s *Session, text string) *ExtractBuilder[T] {
 	return &ExtractBuilder[T]{
 		session: s,
 		text:    text,

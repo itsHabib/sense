@@ -46,7 +46,7 @@ func TestExtract_Basic(t *testing.T) {
 	}
 	s := testSession(mock)
 
-	result, err := Extract[mountError](s, "device /dev/sdf already mounted with vol-123").Run()
+	result, err := newExtractBuilder[mountError](s,"device /dev/sdf already mounted with vol-123").Run()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestExtract_NestedStruct(t *testing.T) {
 	}
 	s := testSession(mock)
 
-	result, err := Extract[personRecord](s, "Alice, 30, lives in Portland OR, active member").Run()
+	result, err := newExtractBuilder[personRecord](s,"Alice, 30, lives in Portland OR, active member").Run()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestExtract_OptionalFields(t *testing.T) {
 	}
 	s := testSession(mock)
 
-	result, err := Extract[optionalFields](s, "Alice, email alice@example.com").Run()
+	result, err := newExtractBuilder[optionalFields](s,"Alice, email alice@example.com").Run()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestExtract_OptionalFields(t *testing.T) {
 
 func TestExtract_EmptyText(t *testing.T) {
 	s := testSession(&mockCaller{})
-	_, err := Extract[mountError](s, "").Run()
+	_, err := newExtractBuilder[mountError](s,"").Run()
 	if !errors.Is(err, ErrNoText) {
 		t.Errorf("expected ErrNoText, got %v", err)
 	}
@@ -136,7 +136,7 @@ func TestExtract_ClientError(t *testing.T) {
 	mock := &mockCaller{err: errors.New("connection refused")}
 	s := testSession(mock)
 
-	_, err := Extract[mountError](s, "some text").Run()
+	_, err := newExtractBuilder[mountError](s,"some text").Run()
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -156,7 +156,7 @@ func TestExtract_BadJSON(t *testing.T) {
 	}
 	s := testSession(mock)
 
-	_, err := Extract[mountError](s, "some text").Run()
+	_, err := newExtractBuilder[mountError](s,"some text").Run()
 	if err == nil {
 		t.Fatal("expected error on bad JSON")
 	}
@@ -171,7 +171,7 @@ func TestExtract_SkipMode(t *testing.T) {
 	t.Setenv("SENSE_SKIP", "1")
 	s := testSession(&mockCaller{})
 
-	result, err := Extract[mountError](s, "anything").Run()
+	result, err := newExtractBuilder[mountError](s,"anything").Run()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestExtract_ContextInPrompt(t *testing.T) {
 	}
 	s := testSession(mock)
 
-	_, _ = Extract[mountError](s, "some error").
+	_, _ = newExtractBuilder[mountError](s,"some error").
 		Context("AWS EC2 EBS mount errors").
 		Run()
 
@@ -213,7 +213,7 @@ func TestExtract_ModelOverride(t *testing.T) {
 	}
 	s := testSession(mock)
 
-	_, _ = Extract[mountError](s, "text").
+	_, _ = newExtractBuilder[mountError](s,"text").
 		Model("claude-haiku-4-5-20251001").
 		Run()
 
@@ -229,7 +229,7 @@ func TestExtract_RecordsUsage(t *testing.T) {
 	}
 	s := testSession(mock)
 
-	_, _ = Extract[mountError](s, "text").Run()
+	_, _ = newExtractBuilder[mountError](s,"text").Run()
 
 	u := s.Usage()
 	if u.Calls != 1 {
@@ -257,7 +257,7 @@ func TestExtract_ConcurrentUsage(t *testing.T) {
 	for range goroutines {
 		go func() {
 			defer func() { done <- struct{}{} }()
-			_, _ = Extract[mountError](s, "text").Run()
+			_, _ = newExtractBuilder[mountError](s,"text").Run()
 		}()
 	}
 	for range goroutines {

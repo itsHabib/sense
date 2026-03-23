@@ -514,7 +514,7 @@ func TestExtract_AWSError(t *testing.T) {
 		Message  string `json:"message" sense:"The error message"`
 	}
 
-	result, err := sense.Extract[mountErr](s,
+	result, err := sense.Extract[mountErr](
 		"attach volume: device /dev/sdf is already in use by vol-0abc123def456").
 		Context("AWS EC2 EBS error messages").
 		Run()
@@ -548,7 +548,7 @@ func TestExtract_LogLine(t *testing.T) {
 		Source  source `json:"source"`
 	}
 
-	result, err := sense.Extract[logEntry](s,
+	result, err := sense.Extract[logEntry](
 		`2024-03-15 14:22:01 ERROR [server.go:142] connection pool exhausted: max 50 connections reached`).
 		Run()
 	if err != nil {
@@ -577,7 +577,7 @@ func TestExtract_OptionalFieldsMissing(t *testing.T) {
 		Phone *string `json:"phone" sense:"Phone number if present"`
 	}
 
-	result, err := sense.Extract[contactInfo](s,
+	result, err := sense.Extract[contactInfo](
 		"Please contact Alice regarding the account issue").
 		Run()
 	if err != nil {
@@ -606,7 +606,7 @@ func TestExtract_KubernetesEvent(t *testing.T) {
 		Images    []string `json:"images" sense:"Container image names if mentioned"`
 	}
 
-	result, err := sense.Extract[k8sEvent](s,
+	result, err := sense.Extract[k8sEvent](
 		`Warning  BackOff  pod/api-server-7b4d5f6-x2k9p  namespace=production  Back-off restarting failed container api-server in pod api-server-7b4d5f6-x2k9p_production(abc123): container "api-server" (image: registry.io/api:v2.3.1) exited with code 137, restart count 14`).
 		Context("Kubernetes event log output from kubectl get events").
 		Run()
@@ -649,7 +649,7 @@ func TestExtract_SQLError(t *testing.T) {
 		Message    string   `json:"message"`
 	}
 
-	result, err := sense.Extract[sqlErr](s,
+	result, err := sense.Extract[sqlErr](
 		`pq: duplicate key value violates unique constraint "users_email_key" on table "users" (SQLSTATE 23505): Key (email)=(alice@example.com) already exists.`).
 		Context("PostgreSQL error messages").
 		Run()
@@ -687,7 +687,7 @@ func TestExtract_GitCommit(t *testing.T) {
 		Files   []fileChange `json:"files" sense:"Files changed with line counts"`
 	}
 
-	result, err := sense.Extract[gitCommit](s, `
+	result, err := sense.Extract[gitCommit](`
 commit a1b2c3d (HEAD -> main)
 Author: Alice Smith <alice@example.com>
 Date:   Mon Mar 15 14:22:01 2024 -0700
@@ -736,7 +736,7 @@ func TestExtract_NginxAccessLog(t *testing.T) {
 		Latency   *string `json:"latency" sense:"Request duration if present"`
 	}
 
-	result, err := sense.Extract[accessLog](s,
+	result, err := sense.Extract[accessLog](
 		`192.168.1.42 - - [15/Mar/2024:14:22:01 +0000] "POST /api/v2/users HTTP/1.1" 201 1842 "https://app.example.com/dashboard" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" rt=0.042`).
 		Context("Nginx combined access log format with request time").
 		Run()
