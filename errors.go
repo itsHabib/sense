@@ -24,7 +24,7 @@ var (
 
 // Error wraps an underlying error with operation context.
 type Error struct {
-	Op      string // Operation that failed: "eval", "compare"
+	Op      string // Operation that failed: "eval", "compare", "extract"
 	Message string
 	Err     error
 }

@@ -1,14 +1,19 @@
-// Package sense provides agent-powered test assertions for Go.
+// Package sense makes sense of non-deterministic output.
 //
-// Create a Session, then use it to evaluate output:
+// Evaluate, compare, and extract structured data from text using Claude
+// as the judge. Designed for testing agents but works anywhere you need
+// to judge or parse unstructured output.
 //
 //	s := sense.NewSession(sense.Config{})
 //	defer s.Close()
 //
+//	// Test assertions
 //	s.Assert(t, doc).
 //	    Expect("covers all sections from the brief").
-//	    Expect("includes actionable recommendations").
 //	    Run()
+//
+//	// Structured extraction
+//	result, err := sense.Extract[MountError](s, "device /dev/sdf already mounted").Run()
 package sense
 
 import "testing"

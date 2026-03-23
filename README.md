@@ -1,6 +1,6 @@
 # Sense
 
-Make sense of non-deterministic output. Agent-powered assertions for Go tests.
+Make sense of non-deterministic output. Evaluate, compare, and extract structured data from text using Claude.
 
 ```go
 var s = sense.NewSession(sense.Config{})
@@ -187,11 +187,47 @@ All `Assert`, `Require`, and `Eval` calls become no-ops that pass immediately.
 | `SENSE_MODEL` | Override default judge model | `claude-sonnet-4-6` |
 | `SENSE_SKIP` | Set to `1` to skip all assertions | unset |
 
+### Extract — parse unstructured text into Go structs
+
+```go
+type MountError struct {
+    Device   string `json:"device" sense:"The device path"`
+    VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
+    Message  string `json:"message"`
+}
+
+result, err := sense.Extract[MountError](s,
+    "device /dev/sdf already mounted with vol-0abc123").
+    Context("AWS EC2 EBS error messages").
+    Run()
+
+fmt.Println(result.Data.Device)   // "/dev/sdf"
+fmt.Println(result.Data.VolumeID) // "vol-0abc123"
+```
+
+Schema is generated from your struct via reflection — `json` tags for field names, `sense` tags for descriptions. Pointer fields are optional; value fields are required.
+
+Works with nested structs, slices, and all Go primitive types. Not just for testing — use it anywhere you need structure from messy text (logs, error messages, API responses, support tickets).
+
+### Usage tracking
+
+```go
+s := sense.NewSession(sense.Config{})
+defer s.Close()
+
+// ... run evals, compares, extracts ...
+
+fmt.Println(s.Usage())
+// sense: 15 calls, 18420 input tokens, 4210 output tokens
+```
+
+Token usage is tracked across all operations in a session using atomic counters — safe for concurrent use.
+
 ## How It Works
 
-1. Your expectations become a numbered list in a prompt
-2. Claude is forced to call a `submit_evaluation` tool via `tool_choice`
-3. The tool's input schema enforces structured JSON (pass/fail per expectation, confidence, reason, evidence)
-4. Sense unmarshals the tool call result and either passes the test or calls `t.Error()`/`t.Fatal()`
+1. Your expectations (or struct schema) become a prompt
+2. Claude is forced to call a structured tool via `tool_choice`
+3. The tool's input schema enforces the output format server-side
+4. Sense unmarshals the tool call result into typed Go structs
 
 No prompt engineering. No JSON parsing. No "hope the model returns valid output." The schema is enforced server-side.
