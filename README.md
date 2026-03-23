@@ -2,36 +2,44 @@
 
 Make sense of non-deterministic output. Evaluate, compare, and extract structured data from text using Claude.
 
+Sense uses the [Anthropic API](https://docs.anthropic.com/en/docs) (Claude) with forced `tool_use` for structured responses — no prompt engineering, no JSON parsing on your end. Requires an Anthropic API key.
+
+### Assert — judge non-deterministic output in tests
+
 ```go
-s := sense.NewSession(sense.Config{})
-defer s.Close()
+func TestAgentOutput(t *testing.T) {
+    doc := runMyAgent()
 
-// Judge agent output against expectations
-s.Assert(t, doc).
-    Expect("covers all sections from the brief").
-    Expect("includes actionable recommendations").
-    Run()
+    s.Assert(t, doc).
+        Expect("covers all sections from the brief").
+        Expect("includes actionable recommendations").
+        Expect("does not hallucinate data sources").
+        Context("task was to write a quarterly report").
+        Run()
+}
+```
 
-// Parse unstructured text into typed structs
+### Extract — parse unstructured text into typed structs
+
+```go
+type MountError struct {
+    Device   string `json:"device" sense:"The device path"`
+    VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
+    Message  string `json:"message"`
+}
+
 result, err := sense.Extract[MountError](s,
     "device /dev/sdf already mounted with vol-0abc123").Run()
+
 fmt.Println(result.Data.Device)   // "/dev/sdf"
 fmt.Println(result.Data.VolumeID) // "vol-0abc123"
 ```
-
-## Why
-
-You're working with non-deterministic output — from agents, LLMs, logs, error messages, APIs. You can't `assert.Equal`. You can't regex your way through every format variation. You need structured judgment and extraction.
-
-Sense uses the [Anthropic API](https://docs.anthropic.com/en/docs) (Claude) to evaluate and extract. It forces structured responses via Claude's `tool_use` feature — no prompt engineering, no JSON parsing on your end. Requires an Anthropic API key.
 
 ## Install
 
 ```bash
 go get github.com/itsHabib/sense
 ```
-
-Set your API key:
 
 ```bash
 export ANTHROPIC_API_KEY=...
@@ -46,7 +54,7 @@ s := sense.NewSession(sense.Config{})
 defer s.Close()
 ```
 
-### Assert — test assertion, continues on failure
+### Assert
 
 ```go
 func TestMyAgent(t *testing.T) {
