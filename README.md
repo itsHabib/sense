@@ -40,7 +40,19 @@ s := sense.NewSession(sense.Config{})
 defer s.Close()
 ```
 
-### Assert failure output
+### Assert — test assertion, continues on failure
+
+```go
+func TestMyAgent(t *testing.T) {
+    output := runMyAgent()
+
+    s.Assert(t, output).
+        Expect("produces valid Go code").
+        Expect("handles errors idiomatically").
+        Context("task was to write a REST API server").
+        Run()
+}
+```
 
 When a check fails, you get structured feedback — what passed, what failed, why, and evidence:
 
@@ -62,6 +74,28 @@ When a check fails, you get structured feedback — what passed, what failed, wh
             no error handling logic, no REST API context
           confidence: 0.99
 ```
+
+### Extract — parse unstructured text into Go structs
+
+```go
+type MountError struct {
+    Device   string `json:"device" sense:"The device path"`
+    VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
+    Message  string `json:"message"`
+}
+
+result, err := sense.Extract[MountError](s,
+    "device /dev/sdf already mounted with vol-0abc123").
+    Context("AWS EC2 EBS error messages").
+    Run()
+
+fmt.Println(result.Data.Device)   // "/dev/sdf"
+fmt.Println(result.Data.VolumeID) // "vol-0abc123"
+```
+
+Schema is generated from your struct via reflection — `json` tags for field names, `sense` tags for descriptions. Pointer fields are optional; value fields are required.
+
+Works with nested structs, slices, and all Go primitive types. Not just for testing — use it anywhere you need structure from messy text (logs, error messages, API responses, support tickets).
 
 ### Require — test assertion, stops on failure
 
