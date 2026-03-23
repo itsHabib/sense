@@ -7,31 +7,6 @@ import (
 	"time"
 )
 
-// Config holds configuration for a Session.
-type Config struct {
-	// APIKey for Claude. Default: $ANTHROPIC_API_KEY
-	APIKey string
-
-	// Model for evaluations. Default: "claude-sonnet-4-6"
-	Model string
-
-	// Timeout per API call. Default: 30s.
-	// Set to -1 to explicitly disable timeouts.
-	Timeout time.Duration
-
-	// MaxRetries on transient failures. Default: 3.
-	// Set to -1 to explicitly disable retries.
-	MaxRetries int
-
-	// Cache for response caching. Default: nil (no caching)
-	Cache Cache
-
-	// Batch enables request batching. Default: nil (individual calls).
-	// When set, requests are collected and submitted as a single batch API call.
-	// 50% cost reduction, same caller interface.
-	Batch *BatchConfig
-}
-
 // SessionUsage is a snapshot of accumulated token usage across a session.
 type SessionUsage struct {
 	InputTokens  int64
@@ -47,7 +22,7 @@ func (u SessionUsage) String() string {
 }
 
 // Session holds a configured client for making evaluations.
-// Create one with NewSession and pass it to your tests.
+// Create one with New or ForTest.
 type Session struct {
 	client     caller
 	model      string
@@ -61,46 +36,18 @@ type Session struct {
 	callCount    atomic.Int64
 }
 
-// NewSession creates a Session from the given config.
-// If Batch is set, requests are collected and submitted as a single batch API call.
-func NewSession(cfg Config) *Session {
-	s := &Session{
-		model:      cfg.Model,
-		timeout:    cfg.Timeout,
-		maxRetries: cfg.MaxRetries,
-		cache:      cfg.Cache,
+// New creates a Session with functional options.
+//
+//	s := sense.New()                                        // defaults
+//	s := sense.New(sense.WithModel("claude-haiku-4-5-20251001"))  // custom model
+//	s := sense.New(sense.WithBatch(50, 2*time.Second))     // batching (requires defer s.Close())
+func New(opts ...Option) *Session {
+	cfg := &sessionConfig{}
+	for _, o := range opts {
+		o(cfg)
 	}
-
-	if s.model == "" {
-		s.model = "claude-sonnet-4-6"
-	}
-	if s.timeout == 0 {
-		s.timeout = 30 * time.Second
-	}
-	if cfg.Timeout < 0 {
-		s.timeout = 0
-	}
-	if s.maxRetries == 0 {
-		s.maxRetries = 3
-	}
-	if cfg.MaxRetries < 0 {
-		s.maxRetries = 0
-	}
-
-	apiKey := cfg.APIKey
-	if apiKey == "" {
-		apiKey = os.Getenv("ANTHROPIC_API_KEY")
-	}
-
-	if cfg.Batch != nil {
-		b := newBatcher(*cfg.Batch, apiKey)
-		s.batcher = b
-		s.client = &batchCaller{batcher: b}
-	} else {
-		s.client = newClaudeClient(apiKey, s.maxRetries)
-	}
-
-	return s
+	applyDefaults(cfg)
+	return buildSession(cfg)
 }
 
 // Close shuts down the session. If batching is enabled, it flushes

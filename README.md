@@ -3,20 +3,18 @@
 Make sense of non-deterministic output. Extract structured data from text and evaluate output quality using Claude.
 
 ```go
-s := sense.NewSession(sense.Config{})
-defer s.Close()
+// Judge: output → pass/fail with evidence
+sense.Assert(t, output).
+    Expect("covers all sections from the brief").
+    Expect("includes actionable recommendations").
+    Run()
 
 // Extract: unstructured text → typed struct
+s := sense.New()
 var m MountError
 s.Extract("device /dev/sdf already mounted with vol-0abc123", &m).Run()
 fmt.Println(m.Device)   // "/dev/sdf"
 fmt.Println(m.VolumeID) // "vol-0abc123"
-
-// Judge: output → pass/fail with evidence
-s.Assert(t, doc).
-    Expect("covers all sections from the brief").
-    Expect("includes actionable recommendations").
-    Run()
 ```
 
 Sense uses the [Anthropic API](https://docs.anthropic.com/en/docs) (Claude) with forced `tool_use` for structured responses — no prompt engineering, no JSON parsing on your end. Requires an Anthropic API key.
@@ -44,6 +42,8 @@ type MountError struct {
     VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
     Message  string `json:"message"`
 }
+
+s := sense.New()
 
 var m MountError
 _, err := s.Extract("device /dev/sdf already mounted with vol-0abc123", &m).
@@ -91,7 +91,7 @@ s.Extract(thirdPartyJSON, &order).Context("Legacy vendor API, format varies by r
 func TestMyAgent(t *testing.T) {
     output := runMyAgent()
 
-    s.Assert(t, output).
+    sense.Assert(t, output).
         Expect("produces valid Go code").
         Expect("handles errors idiomatically").
         Context("task was to write a REST API server").
@@ -123,7 +123,7 @@ When a check fails, you get structured feedback — what passed, what failed, wh
 ### Require — test assertion, stops on failure
 
 ```go
-s.Require(t, output).
+sense.Require(t, output).
     Expect("produces valid Go code").
     Run()
 ```
@@ -133,7 +133,7 @@ s.Require(t, output).
 ### Eval — inspect results programmatically
 
 ```go
-result, err := s.Eval(output).
+result, err := sense.Eval(output).
     Expect("is a complete sentence").
     Expect("mentions an animal").
     Expect("contains a number").
@@ -150,7 +150,7 @@ for _, c := range result.FailedChecks() {
 ### Compare — A/B test two outputs
 
 ```go
-cmp, err := s.Compare(outputV1, outputV2).
+cmp, err := sense.Compare(outputV1, outputV2).
     Criteria("completeness").
     Criteria("clarity").
     Criteria("professionalism").
@@ -164,21 +164,58 @@ fmt.Println(cmp.Reasoning)  // "Output A is significantly better..."
 
 ## Session
 
-Create a session once, reuse it everywhere:
+Three tiers — use only what you need:
 
 ```go
-s := sense.NewSession(sense.Config{
-    APIKey:     os.Getenv("ANTHROPIC_API_KEY"), // default: $ANTHROPIC_API_KEY
-    Model:      "claude-sonnet-4-6",            // default
-    Timeout:    30 * time.Second,               // default
-    MaxRetries: 3,                              // default
-})
-defer s.Close()
+// Zero config — just works
+sense.Assert(t, output).Expect("covers all sections").Run()
+
+// Test suite — auto-cleanup, usage tracking
+s := sense.ForTest(t)
+s.Assert(t, output).Expect("covers all sections").Run()
+
+// Custom config
+s := sense.New(sense.WithModel("claude-haiku-4-5-20251001"))
+s.Assert(t, output).Expect("covers all sections").Run()
+```
+
+Extract requires an explicit session:
+
+```go
+s := sense.New()
+var m MountError
+s.Extract("device /dev/sdf already mounted", &m).Run()
+
+// Generic version
+result, err := sense.Extract[MountError](s, logLine).Run()
+```
+
+### Functional options
+
+```go
+s := sense.New(
+    sense.WithModel("claude-haiku-4-5-20251001"),
+    sense.WithTimeout(10 * time.Second),
+    sense.WithRetries(5),
+    sense.WithAPIKey("sk-..."),
+    sense.WithCache(sense.MemoryCache()),
+)
+```
+
+### ForTest — auto-cleanup for test suites
+
+```go
+s := sense.ForTest(t)                                    // defaults
+s := sense.ForTest(t, sense.WithModel("claude-haiku-4-5-20251001"))  // custom
+
+// t.Cleanup handles Close and prints usage summary
 ```
 
 ### Usage tracking
 
 ```go
+s := sense.New()
+// ... run evaluations ...
 fmt.Println(s.Usage())
 // sense: 15 calls, 18420 input tokens, 4210 output tokens
 ```
@@ -190,12 +227,8 @@ Token usage is tracked across all operations using atomic counters — safe for 
 Enable batching for 50% cost reduction. Requests are collected and submitted as a single Anthropic Batch API call:
 
 ```go
-s = sense.NewSession(sense.Config{
-    Batch: &sense.BatchConfig{
-        MaxSize: 50,                   // flush after 50 requests
-        MaxWait: 2 * time.Second,      // or after 2s, whichever first
-    },
-})
+s := sense.New(sense.WithBatch(50, 2*time.Second))
+defer s.Close() // required — flushes pending batch requests
 ```
 
 **Note:** Batching trades latency for cost. The Batch API processes requests asynchronously — it can take minutes to hours depending on load. Use it for large test suites where 50% cost savings matter more than speed.

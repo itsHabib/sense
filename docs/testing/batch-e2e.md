@@ -17,12 +17,8 @@ cmp, err := sense.Compare(a, b).Criteria("quality").Judge()
 Enable batching via config:
 
 ```go
-sense.Configure(sense.Config{
-    Batch: &sense.BatchConfig{
-        MaxSize:   20,                     // flush after 20 requests
-        MaxWait:   500 * time.Millisecond, // or flush after 500ms, whichever first
-    },
-})
+s := sense.New(sense.WithBatch(20, 500*time.Millisecond))
+defer s.Close()
 ```
 
 When `Batch` is nil (default), requests go directly to Claude as individual calls — current behavior, no change.
@@ -486,14 +482,13 @@ The `pending` slice is only read and written inside the `run()` goroutine's sele
 Tests use `t.Parallel()` so requests arrive concurrently. The batcher collects them during the `MaxWait` window and fires one batch.
 
 ```go
+var s *sense.Session
+
 func TestMain(m *testing.M) {
-    sense.Configure(sense.Config{
-        Batch: &sense.BatchConfig{
-            MaxSize: 50,
-            MaxWait: 2 * time.Second,
-        },
-    })
-    os.Exit(m.Run())
+    s = sense.New(sense.WithBatch(50, 2*time.Second))
+    code := m.Run()
+    s.Close()
+    os.Exit(code)
 }
 
 func TestEval_HighScore(t *testing.T) {

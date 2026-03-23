@@ -117,9 +117,7 @@ Finish the stubbed `FileCache` implementation and wire caching into the call pat
 **API:**
 
 ```go
-s := sense.NewSession(sense.Config{
-    Cache: sense.NewFileCache(".sense-cache"),
-})
+s := sense.New(sense.WithCache(sense.FileCache(".sense-cache")))
 ```
 
 **What to build:**
@@ -195,9 +193,7 @@ Standard CI output format that every CI system on earth can ingest.
 **API:**
 
 ```go
-s := sense.NewSession(sense.Config{
-    Reporter: sense.NewJUnitReporter("sense-results.xml"),
-})
+s := sense.New(sense.WithReporter(sense.NewJUnitReporter("sense-results.xml")))
 defer s.Close() // flushes report on close
 ```
 
@@ -235,12 +231,10 @@ Run the same evaluation against multiple models. Require agreement for a pass. S
 **API:**
 
 ```go
-s := sense.NewSession(sense.Config{
-    Consensus: &sense.ConsensusConfig{
-        Models:   []string{"claude-sonnet-4-6", "claude-haiku-4-5-20251001"},
-        Strategy: sense.ConsensusAll,  // all must agree
-    },
-})
+s := sense.New(sense.WithConsensus(
+    sense.ConsensusAll,
+    "claude-sonnet-4-6", "claude-haiku-4-5-20251001",
+))
 
 // Same API — consensus is transparent
 result, err := s.Eval(output).
@@ -263,7 +257,7 @@ for _, j := range result.Judgments {
 
 **What to build:**
 
-- `ConsensusConfig` struct on `Config` — models list + strategy
+- `WithConsensus` functional option — strategy + models list
 - When consensus is configured, `JudgeContext` fans out to N models concurrently
 - Each model gets the same prompt, returns its own `EvalResult`
 - Merge results based on strategy: aggregate pass/fail, average scores, combine reasons
@@ -359,14 +353,12 @@ Prevent runaway costs, especially important with consensus (where misconfigured 
 **API:**
 
 ```go
-s := sense.NewSession(sense.Config{
-    MaxCost: sense.Dollars(0.50), // hard cap
-})
+s := sense.New(sense.WithMaxCost(sense.Dollars(0.50)))
 ```
 
 **What to build:**
 
-- `MaxCost` field on `Config` (float64, in dollars)
+- `WithMaxCost` functional option (float64, in dollars)
 - `Dollars(n float64) float64` helper for readability
 - After each `recordUsage` call, estimate cost from token counts using model pricing
 - If accumulated cost exceeds `MaxCost`, return `ErrBudgetExceeded` on subsequent calls

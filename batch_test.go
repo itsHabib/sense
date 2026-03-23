@@ -12,25 +12,16 @@ func TestBatchCaller_ImplementsCaller(_ *testing.T) {
 	var _ caller = (*batchCaller)(nil)
 }
 
-func TestBatchConfig_InConfig(t *testing.T) {
-	cfg := Config{
-		Batch: &BatchConfig{
-			MaxSize: 10,
-			MaxWait: 500 * time.Millisecond,
-		},
+func TestBatchConfig_Fields(t *testing.T) {
+	cfg := BatchConfig{
+		MaxSize: 10,
+		MaxWait: 500 * time.Millisecond,
 	}
-	if cfg.Batch.MaxSize != 10 {
-		t.Errorf("expected MaxSize=10, got %d", cfg.Batch.MaxSize)
+	if cfg.MaxSize != 10 {
+		t.Errorf("expected MaxSize=10, got %d", cfg.MaxSize)
 	}
-	if cfg.Batch.MaxWait != 500*time.Millisecond {
-		t.Errorf("expected MaxWait=500ms, got %v", cfg.Batch.MaxWait)
-	}
-}
-
-func TestBatchConfig_NilByDefault(t *testing.T) {
-	cfg := Config{}
-	if cfg.Batch != nil {
-		t.Error("expected Batch to be nil by default")
+	if cfg.MaxWait != 500*time.Millisecond {
+		t.Errorf("expected MaxWait=500ms, got %v", cfg.MaxWait)
 	}
 }
 
@@ -194,13 +185,8 @@ func TestBuildBatchParams_CorrectStructure(t *testing.T) {
 	}
 }
 
-func TestNewSession_BatchConfig(t *testing.T) {
-	s := NewSession(Config{
-		Batch: &BatchConfig{
-			MaxSize: 10,
-			MaxWait: 1 * time.Second,
-		},
-	})
+func TestNew_WithBatchConfig(t *testing.T) {
+	s := New(WithBatch(10, 1*time.Second))
 	defer s.Close()
 
 	if _, ok := s.client.(*batchCaller); !ok {
@@ -208,9 +194,8 @@ func TestNewSession_BatchConfig(t *testing.T) {
 	}
 }
 
-func TestNewSession_NoBatch(t *testing.T) {
-	s := NewSession(Config{})
-	defer s.Close()
+func TestNew_NoBatch(t *testing.T) {
+	s := New()
 
 	if _, ok := s.client.(*claudeClient); !ok {
 		t.Fatalf("expected *claudeClient, got %T", s.client)

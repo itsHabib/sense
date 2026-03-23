@@ -1,52 +1,52 @@
 # API Reference
 
-Package: `github.com/itsHabib/agentkit`
+Package: `github.com/itsHabib/sense`
 
 ---
 
-## Configuration
+## Session
 
-### func Configure
-
-```go
-func Configure(cfg Config)
-```
-
-Sets global defaults. Call in `TestMain` or `init`. Everything has sane defaults — you only need to set `APIKey` if `ANTHROPIC_API_KEY` isn't in your environment.
+### func New
 
 ```go
-func TestMain(m *testing.M) {
-    agent.Configure(agent.Config{
-        Cache: agent.FileCache("testdata/agent-cache"),
-    })
-    os.Exit(m.Run())
-}
+func New(opts ...Option) *Session
 ```
 
-### type Config
+Creates a Session with functional options. Everything has sane defaults — you only need to set an API key if `ANTHROPIC_API_KEY` isn't in your environment.
 
 ```go
-type Config struct {
-    // APIKey for Claude. Default: $ANTHROPIC_API_KEY
-    APIKey string
-
-    // Model for evaluations. Default: "claude-sonnet-4-6"
-    Model string
-
-    // Cache for response caching. Default: nil (no caching)
-    Cache Cache
-
-    // Timeout per API call. Default: 30s
-    Timeout time.Duration
-
-    // MaxRetries on transient failures. Default: 3
-    MaxRetries int
-}
+s := sense.New()
+s := sense.New(sense.WithModel("claude-haiku-4-5-20251001"))
+s := sense.New(sense.WithBatch(50, 2*time.Second)) // requires defer s.Close()
 ```
+
+### func ForTest
+
+```go
+func ForTest(t testing.TB, opts ...Option) *Session
+```
+
+Creates a Session scoped to the test lifetime. Close is called automatically via `t.Cleanup`, and a usage summary is printed to the test log.
+
+```go
+s := sense.ForTest(t)
+s := sense.ForTest(t, sense.WithModel("claude-haiku-4-5-20251001"))
+```
+
+### Functional Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `WithModel(string)` | Claude model for evaluations | `claude-sonnet-4-6` |
+| `WithTimeout(time.Duration)` | Per-call timeout. -1 to disable | 30s |
+| `WithRetries(int)` | Retry attempts on transient failures. -1 to disable | 3 |
+| `WithBatch(maxSize, maxWait)` | Enable request batching (50% cost reduction) | disabled |
+| `WithCache(Cache)` | Response cache | nil |
+| `WithAPIKey(string)` | Anthropic API key | `$ANTHROPIC_API_KEY` |
 
 ---
 
-## Core API
+## Package-Level Functions (Zero Config)
 
 ### func Assert
 
@@ -54,14 +54,22 @@ type Config struct {
 func Assert(t testing.TB, output any) *AssertBuilder
 ```
 
-Creates a test assertion. Calls `t.Fatal()` if any expectation fails. The output can be a string, `[]byte`, or any type (structs are serialized to JSON).
+Creates a test assertion using the default session. Calls `t.Error()` on failure (test continues). The output can be a string, `[]byte`, or any type (structs are serialized to JSON).
 
 ```go
-agent.Assert(t, doc).
+sense.Assert(t, doc).
     Expect("covers the requirements").
     Expect("includes code examples").
     Run()
 ```
+
+### func Require
+
+```go
+func Require(t testing.TB, output any) *AssertBuilder
+```
+
+Like Assert, but calls `t.Fatal()` on failure (test stops).
 
 ### func Eval
 
@@ -72,7 +80,7 @@ func Eval(output any) *EvalBuilder
 Evaluates output without failing a test. Returns a result you can inspect programmatically.
 
 ```go
-result, err := agent.Eval(doc).
+result, err := sense.Eval(doc).
     Expect("is well-structured").
     Expect("has actionable items").
     Judge()
@@ -92,7 +100,7 @@ func Compare(a, b any) *CompareBuilder
 A/B comparison of two outputs.
 
 ```go
-cmp, err := agent.Compare(docV1, docV2).
+cmp, err := sense.Compare(docV1, docV2).
     Criteria("completeness").
     Criteria("clarity").
     Judge()
@@ -238,9 +246,8 @@ func MemoryCache() Cache
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Claude API key | Required (or set in Config) |
-| `AGENTKIT_MODEL` | Default judge model | `claude-sonnet-4-6` |
-| `AGENTKIT_TIMEOUT` | Default timeout | `30s` |
-| `AGENTKIT_SKIP` | Set to `1` to skip all agent assertions (for offline dev) | unset |
+| `ANTHROPIC_API_KEY` | Claude API key | Required (or set via `WithAPIKey`) |
+| `SENSE_MODEL` | Override default judge model | `claude-sonnet-4-6` |
+| `SENSE_SKIP` | Set to `1` to skip all sense calls (for offline dev) | unset |
 
-`AGENTKIT_SKIP` is useful for offline development — all `Assert` and `Eval` calls become no-ops, so `go test` still runs without an API key.
+`SENSE_SKIP` is useful for offline development — all `Assert`, `Eval`, `Extract`, and `Compare` calls become no-ops, so `go test` still runs without an API key.

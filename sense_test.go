@@ -8,8 +8,7 @@ import (
 )
 
 func TestEvalNoExpectations(t *testing.T) {
-	s := sense.NewSession(sense.Config{})
-	defer s.Close()
+	s := sense.ForTest(t)
 
 	_, err := s.Eval("hello").Judge()
 	if err == nil {
@@ -21,8 +20,7 @@ func TestEvalNoExpectations(t *testing.T) {
 }
 
 func TestCompareNoCriteria(t *testing.T) {
-	s := sense.NewSession(sense.Config{})
-	defer s.Close()
+	s := sense.ForTest(t)
 
 	_, err := s.Compare("a", "b").Judge()
 	if err == nil {
@@ -35,8 +33,7 @@ func TestCompareNoCriteria(t *testing.T) {
 
 func TestSkipModeAssert(t *testing.T) {
 	t.Setenv("SENSE_SKIP", "1")
-	s := sense.NewSession(sense.Config{})
-	defer s.Close()
+	s := sense.ForTest(t)
 
 	s.Assert(t, "anything").
 		Expect("impossible expectation").
@@ -45,8 +42,7 @@ func TestSkipModeAssert(t *testing.T) {
 
 func TestSkipModeEval(t *testing.T) {
 	t.Setenv("SENSE_SKIP", "1")
-	s := sense.NewSession(sense.Config{})
-	defer s.Close()
+	s := sense.ForTest(t)
 
 	result, err := s.Eval("anything").
 		Expect("something").

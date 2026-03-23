@@ -14,7 +14,7 @@ import (
 var s *sense.Session
 
 func TestMain(m *testing.M) {
-	s = sense.NewSession(sense.Config{})
+	s = sense.New()
 	code := m.Run()
 	t := s.Usage()
 	if t.Calls > 0 {

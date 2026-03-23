@@ -10,17 +10,31 @@
 // Both use the Anthropic API with forced tool_use for structured responses.
 // No prompt engineering, no JSON parsing — the schema is enforced server-side.
 //
-//	s := sense.NewSession(sense.Config{})
-//	defer s.Close()
+// # Zero config
 //
-//	// Extract: unstructured text → typed struct
+//	sense.Assert(t, output).Expect("covers all sections").Run()
+//	result, err := sense.Eval(output).Expect("is valid JSON").Judge()
+//
+// # Test suite — auto-cleanup, usage tracking
+//
+//	s := sense.ForTest(t)
+//	s.Assert(t, output).Expect("covers all sections").Run()
+//
+// # Full control
+//
+//	s := sense.New(sense.WithModel("claude-haiku-4-5-20251001"))
+//	s.Assert(t, output).Expect("covers all sections").Run()
+//
+// # Extract — structured data from text
+//
+//	s := sense.New()
 //	var m MountError
 //	s.Extract("device /dev/sdf already mounted", &m).Run()
 //
-//	// Judge: output → pass/fail with evidence
-//	s.Assert(t, doc).
-//	    Expect("covers all sections from the brief").
-//	    Run()
+// # Batching — 50% cost reduction (requires Close)
+//
+//	s := sense.New(sense.WithBatch(50, 2*time.Second))
+//	defer s.Close()
 package sense
 
 import "testing"

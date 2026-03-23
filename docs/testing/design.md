@@ -112,9 +112,8 @@ Cache is opt-in. When enabled, the first run hits the API and saves the response
 
 ```go
 func TestMain(m *testing.M) {
-    agent.Configure(agent.Config{
-        Cache: agent.FileCache("testdata/agent-cache"),
-    })
+    // Sessions with caching can be created per-test or shared via TestMain
+    s = sense.New(sense.WithCache(sense.FileCache("testdata/sense-cache")))
     os.Exit(m.Run())
 }
 ```
