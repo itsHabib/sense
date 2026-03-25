@@ -963,3 +963,130 @@ func TestBothInterfaces(_ *testing.T) {
 	var b both = s
 	_ = fmt.Sprintf("%T", b) // use b to avoid unused var
 }
+
+// --- ExtractSlice ---
+
+func TestExtractSlice_MultipleLogLines(t *testing.T) {
+	t.Parallel()
+
+	type logEntry struct {
+		Level   string `json:"level" sense:"Log level: ERROR, WARN, INFO, DEBUG"`
+		Message string `json:"message" sense:"The log message content"`
+	}
+
+	result, err := sense.ExtractSlice[logEntry](`
+2024-03-15 14:22:01 ERROR connection pool exhausted: max 50 connections reached
+2024-03-15 14:22:02 WARN retry attempt 3 of 5 for request abc-123
+2024-03-15 14:22:03 ERROR timeout after 30s waiting for response from upstream
+	`).Context("Application server log output").Run()
+	if err != nil {
+		t.Fatalf("extract error: %v", err)
+	}
+
+	if len(result.Data) < 3 {
+		t.Fatalf("expected at least 3 log entries, got %d", len(result.Data))
+	}
+	for i, entry := range result.Data {
+		if entry.Level == "" {
+			t.Errorf("entry %d: expected level", i)
+		}
+		if entry.Message == "" {
+			t.Errorf("entry %d: expected message", i)
+		}
+		t.Logf("entry %d: level=%s message=%q", i, entry.Level, entry.Message)
+	}
+	if result.TokensUsed == 0 {
+		t.Error("expected non-zero token usage")
+	}
+}
+
+func TestExtractSlice_InvoiceLineItems(t *testing.T) {
+	t.Parallel()
+
+	type lineItem struct {
+		Description string  `json:"description" sense:"Item description"`
+		Quantity    int     `json:"quantity" sense:"Number of units"`
+		UnitPrice   float64 `json:"unit_price" sense:"Price per unit in dollars"`
+	}
+
+	result, err := sense.ExtractSlice[lineItem](`
+INVOICE #2024-0042
+
+Widget Pro (x3)           $29.99 each
+Mounting Bracket (x12)    $4.50 each
+Express Shipping (x1)     $15.00 each
+
+Subtotal: $173.97
+	`).Context("Invoice line items with quantity and unit price").Run()
+	if err != nil {
+		t.Fatalf("extract error: %v", err)
+	}
+
+	if len(result.Data) < 3 {
+		t.Fatalf("expected at least 3 line items, got %d", len(result.Data))
+	}
+	for i, item := range result.Data {
+		if item.Description == "" {
+			t.Errorf("item %d: expected description", i)
+		}
+		if item.Quantity == 0 {
+			t.Errorf("item %d: expected non-zero quantity", i)
+		}
+		if item.UnitPrice == 0 {
+			t.Errorf("item %d: expected non-zero unit price", i)
+		}
+		t.Logf("item %d: %s x%d @ $%.2f", i, item.Description, item.Quantity, item.UnitPrice)
+	}
+}
+
+func TestExtractSlice_EntitiesFromParagraph(t *testing.T) {
+	t.Parallel()
+
+	type entity struct {
+		Name string `json:"name" sense:"The entity name (person, company, or place)"`
+		Type string `json:"type" sense:"Entity type: person, company, or place"`
+	}
+
+	result, err := sense.ExtractSlice[entity](`
+Satya Nadella, CEO of Microsoft, announced a new partnership with OpenAI
+during a keynote in San Francisco. The deal, valued at $10 billion, will
+see Microsoft integrate OpenAI's technology across Azure cloud services.
+Google's Sundar Pichai responded by accelerating DeepMind's research efforts
+in London.
+	`).Context("Named entity extraction from news text").Run()
+	if err != nil {
+		t.Fatalf("extract error: %v", err)
+	}
+
+	if len(result.Data) < 4 {
+		t.Fatalf("expected at least 4 entities, got %d", len(result.Data))
+	}
+	for i, e := range result.Data {
+		if e.Name == "" {
+			t.Errorf("entity %d: expected name", i)
+		}
+		if e.Type == "" {
+			t.Errorf("entity %d: expected type", i)
+		}
+		t.Logf("entity %d: name=%s type=%s", i, e.Name, e.Type)
+	}
+}
+
+func TestExtractSlice_SkipMode(t *testing.T) {
+	t.Setenv("SENSE_SKIP", "1")
+
+	type simple struct {
+		Name string `json:"name"`
+	}
+
+	result, err := sense.ExtractSlice[simple]("anything").Run()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result in skip mode")
+	}
+	if len(result.Data) != 0 {
+		t.Errorf("expected empty slice in skip mode, got %d items", len(result.Data))
+	}
+}
