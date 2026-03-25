@@ -124,16 +124,8 @@ func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceR
 		return nil, &Error{Op: "extract_slice", Message: "failed to parse result", Err: err}
 	}
 
-	if b.validate != nil {
-		for i, item := range wrapper.Items {
-			if err := b.validate(item); err != nil {
-				return nil, &Error{
-					Op:      "extract_slice",
-					Message: fmt.Sprintf("validation failed on item %d", i),
-					Err:     err,
-				}
-			}
-		}
+	if err := b.validateItems(wrapper.Items); err != nil {
+		return nil, err
 	}
 
 	result := &ExtractSliceResult[T]{
@@ -146,6 +138,24 @@ func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceR
 	}
 
 	return result, nil
+}
+
+func (b *ExtractSliceBuilder[T]) validateItems(items []T) error {
+	if b.validate == nil {
+		return nil
+	}
+
+	for i, item := range items {
+		if err := b.validate(item); err != nil {
+			return &Error{
+				Op:      "extract_slice",
+				Message: fmt.Sprintf("validation failed on item %d", i),
+				Err:     err,
+			}
+		}
+	}
+
+	return nil
 }
 
 // sliceSchemaFor wraps the struct schema for T in an object with an
