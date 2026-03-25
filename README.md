@@ -65,6 +65,41 @@ result, err := sense.Extract[MountError]("device /dev/sdf already mounted with v
 fmt.Println(result.Data.Device)   // "/dev/sdf"
 ```
 
+### ExtractSlice — multiple items from one text
+
+Extract a list of typed structs from a single input. Same API as `Extract`, returns `[]T`:
+
+```go
+type LineItem struct {
+    Description string  `json:"description" sense:"Item description"`
+    Quantity    int     `json:"quantity" sense:"Number of units"`
+    UnitPrice   float64 `json:"unit_price" sense:"Price per unit in dollars"`
+}
+
+result, err := sense.ExtractSlice[LineItem](invoiceText).
+    Context("Invoice line items").
+    Run()
+
+for _, item := range result.Data {
+    fmt.Printf("%s x%d @ $%.2f\n", item.Description, item.Quantity, item.UnitPrice)
+}
+```
+
+Works with log batches, entity lists, table rows — anything where one text contains multiple structured items.
+
+Per-item validation is built in:
+
+```go
+result, err := sense.ExtractSlice[LineItem](text).
+    Validate(func(item LineItem) error {
+        if item.Quantity <= 0 {
+            return fmt.Errorf("invalid quantity: %d", item.Quantity)
+        }
+        return nil
+    }).
+    Run()
+```
+
 ### Use cases
 
 Extract isn't just for tests. Use it anywhere you need structure from messy text:
@@ -255,7 +290,7 @@ Skip all sense calls when you don't have an API key:
 SENSE_SKIP=1 go test ./...
 ```
 
-All `Assert`, `Require`, `Eval`, `Extract`, and `Compare` calls become no-ops that pass immediately.
+All `Assert`, `Require`, `Eval`, `Extract`, `ExtractSlice`, and `Compare` calls become no-ops that pass immediately.
 
 ## Interfaces
 
@@ -303,13 +338,13 @@ No prompt engineering. No JSON parsing. No "hope the model returns valid output.
 ## What's Next
 
 - [ ] **Deterministic checks** — mix `Check(sense.ValidJSON())` with LLM-judged `Expect()` in the same assertion. Deterministic checks run first; if any fail, skip the LLM call. Free, fast, saves money.
-- [ ] **Extract validation** — `Validate(func(T) error)` on extracted structs. Catch hallucinated values (negative totals, impossible dates) without another LLM call.
+- [ ] **Extract validation** — `Validate(func(T) error)` on single `Extract[T]`. Already available on `ExtractSlice[T]`.
 - [ ] **File cache** — cache responses to disk. Identical prompts during iterative development hit the cache instead of the API.
 - [ ] **Prompt caching** — use Anthropic's `cache_control` to reduce cost on repeated system prompts within a session.
 - [ ] **Snapshots** — save eval results to disk, detect regressions when prompts change. `SENSE_UPDATE_SNAPSHOTS=1` to update.
 - [ ] **CI reporter** — JUnit XML output and GitHub Actions annotations so eval results show up in your pipeline.
 - [ ] **Multi-judge consensus** — fan out to N models, require agreement for a pass. Reduces false positives from single-model bias.
-- [ ] **ExtractSlice[T]** — extract `[]T` from text with multiple items (invoices, log batches, entity lists).
+- [x] **ExtractSlice[T]** — extract `[]T` from text with multiple items (invoices, log batches, entity lists).
 - [ ] **Cost budget** — `MaxCost: sense.Dollars(0.50)` to cap session spend. Prevents runaway costs in CI.
 
 These are ideas, not commitments. See [docs/NEXT.md](docs/NEXT.md) for details.
