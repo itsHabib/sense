@@ -58,16 +58,69 @@ tracks:
       unit-tests:            { status: done, notes: "75 tests — 12 behavior + 63 schema (type mapping, tags, pointers, slices, nesting, caching, edge cases)" }
       e2e-tests:             { status: done, notes: "7 tests — AWS error, log line, k8s event, SQL error, git commit, nginx log, optional fields" }
 
-  next-features:
-    description: "Planned features — see docs/NEXT.md for full specs"
+  eval-quality:
+    description: "Eval quality features — custom checks, validation, snapshots, multi-judge"
     status: pending
     phases:
       custom-evaluators:
         status: next
         notes: "Checker interface, deterministic checks run before LLM, fail-fast"
+      extract-validation:
+        status: next
+        notes: "Validate(func(T) error) on extracted structs, catch hallucinations"
       snapshots:
-        status: pending
+        status: next
         notes: "Save eval results to disk, detect regressions across runs"
       multi-judge-consensus:
-        status: pending
+        status: next
         notes: "Fan out to N models, require agreement via configurable strategy"
+
+  dataset-scale:
+    description: "Dataset runner, parallel execution, ExtractSlice"
+    status: pending
+    phases:
+      dataset-runner:
+        status: next
+        notes: "Run same eval across N inputs from JSONL/CSV, aggregate pass rates"
+      parallel-execution:
+        status: next
+        notes: "WithConcurrency(n) — semaphore + global rate limiting"
+      extract-slice:
+        status: next
+        notes: "ExtractSlice[T] — extract []T from text with multiple items"
+
+  cost-safety:
+    description: "Cost budget, file cache, prompt caching"
+    status: pending
+    phases:
+      cost-budget:
+        status: next
+        notes: "WithMaxCost(dollars(0.50)) — hard cap on session spend"
+      file-cache:
+        status: next
+        notes: "Finish stubbed FileCache, persist responses across runs"
+      prompt-caching:
+        status: next
+        notes: "cache_control: ephemeral on system prompts, 90% cost reduction"
+
+  ci-integration:
+    description: "CI reporters, GitHub annotations, multi-model judges"
+    status: pending
+    phases:
+      junit-reporter:
+        status: next
+        notes: "JUnit XML output for CI systems"
+      github-annotations:
+        status: next
+        notes: "Inline PR annotations, auto-enabled in GitHub Actions"
+      multi-model-judges:
+        status: next
+        notes: "OpenAI caller implementation, judge with any model"
+
+  api-surface:
+    description: "Session interface for mocking"
+    status: pending
+    phases:
+      session-interface:
+        status: next
+        notes: "Evaluator interface — mock Sense without API key"

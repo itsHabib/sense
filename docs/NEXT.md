@@ -1,26 +1,22 @@
-# Sense — Roadmap
+# Sense — Feature Backlog
 
-What's shipped, what's next, and why — in priority order.
+What's shipped and what's on deck. Features are grouped by category, not ordered — pick what matters most for the current use case.
 
 ---
 
 ## Shipped
 
-### Cost Tracking (v0.1.0)
+### Cost Tracking
 
 Atomic token counters across all operations. `s.Usage()` returns a `SessionUsage` snapshot. Done.
 
 ---
 
-## v0.2: Custom Evaluators + Extract Validation
+## Eval Quality
 
-Merge two ideas: deterministic pre-LLM checks on Eval/Assert, and typed post-extraction validation on Extract.
-
-### Deterministic Checks (Eval/Assert)
+### Custom Evaluators (Deterministic Checks)
 
 Run local checks before the LLM call. If any fail, skip the API call entirely — saves cost.
-
-**API:**
 
 ```go
 s.Assert(t, output).
@@ -62,23 +58,11 @@ var myCustomCheck = sense.CheckFunc("has required headers", func(output string) 
 - Deterministic checks run first (fast, free). If any fail, skip the LLM call entirely
 - Results merge into the same `EvalResult.Checks` slice with `Confidence: 1.0`
 
-**Why it matters:**
-
-Not everything needs an LLM judge. "Is this valid JSON?" is a `json.Unmarshal` call, not a $0.003 API request. Mixing deterministic and semantic checks in one assertion gives you fast feedback on the obvious stuff and LLM judgment on the fuzzy stuff. Running deterministic checks first also lets you fail fast — no point asking Claude if the output "handles errors well" when it's not even valid Go.
-
-### Extract Validation (typed checks on extracted structs)
+### Extract Validation
 
 Run validation on the extracted struct *after* extraction. Unlike Eval checks (which operate on raw text and run *before* the LLM call), Extract checks operate on the typed result and run *after*.
 
-**API:**
-
 ```go
-type Order struct {
-    CustomerID string  `json:"customer_id" sense:"The customer identifier"`
-    Total      float64 `json:"total" sense:"Order total in dollars"`
-    Items      int     `json:"items" sense:"Number of line items"`
-}
-
 result, err := sense.Extract[Order](rawEmail).
     Validate(func(o Order) error {
         if o.Total < 0 {
@@ -100,66 +84,9 @@ result, err := sense.Extract[Order](rawEmail).
 - Multiple `Validate()` calls chain — all run, first error wins
 - No LLM cost — validation is pure Go on the typed struct
 
-**Why it matters:**
-
-Extract produces structure from chaos, but the LLM can hallucinate plausible-looking values. A negative order total, a date in the future, a missing required field — these are things a typed check catches instantly. Without this, every Extract call needs manual if-statements after it. With it, validation is part of the extraction pipeline.
-
----
-
-## v0.3: FileCache + Prompt Caching
-
-Two layers of cost reduction that stack.
-
-### FileCache
-
-Finish the stubbed `FileCache` implementation and wire caching into the call path.
-
-**API:**
-
-```go
-s := sense.New(sense.WithCache(sense.FileCache(".sense-cache")))
-```
-
-**What to build:**
-
-- Implement `FileCache.Get` and `FileCache.Set` (currently no-op stubs)
-- Cache key: SHA-256 of `(system_prompt, user_message, tool_schema, model)`
-- Storage: one file per cache entry, key as filename, response bytes as content
-- Wire cache into the `caller` layer — check cache before API call, store after
-- Cache is per-session, opt-in via `Config.Cache`
-- No TTL by default (LLM responses to identical inputs are stable). Optional `MaxAge` on `FileCache` for staleness control
-
-**Why it matters:**
-
-During iterative development, you re-evaluate the *exact same prompt* dozens of times while tweaking tests. That's burning money for identical results. FileCache eliminates redundant API calls entirely. MemoryCache already exists but only helps within a single process. FileCache persists across runs.
-
-### Anthropic Prompt Caching
-
-Use Anthropic's `cache_control` to reduce cost on repeated system prompts within a session.
-
-**What to build:**
-
-- Add `cache_control: {"type": "ephemeral"}` to the system message in `callRequest`
-- The three system prompts (`evalSystemPrompt`, `compareSystemPrompt`, `extractSystemPrompt`) are identical across every call of their type
-- Anthropic caches the KV state server-side within a 5-minute TTL
-- First call pays full price. Subsequent calls with the same system prompt pay 90% less for those tokens
-- No API surface change — transparent optimization in the client layer
-
-**Why it matters:**
-
-A test suite that runs 20 evals in sequence sends the same ~500-token system prompt 20 times. With prompt caching, you pay full price once and 90% less on the remaining 19. Free money for anyone running more than a handful of evals per session. Stacks with FileCache — prompt caching helps on cache-miss calls, FileCache eliminates cache-hit calls entirely.
-
----
-
-## v0.4: Snapshots + CI Reporter
-
-Ship together — snapshots without CI integration is just JSON files nobody looks at.
-
 ### Snapshots
 
-Save eval results to disk. On subsequent runs, compare against the snapshot. Catch regressions.
-
-**API:**
+Save eval results to disk. On subsequent runs, compare against the snapshot. Catch regressions. This is what turns Sense from "assertion library" into "eval framework."
 
 ```go
 // First run: saves to .snapshots/TestMyAgent.json
@@ -167,7 +94,7 @@ Save eval results to disk. On subsequent runs, compare against the snapshot. Cat
 s.Assert(t, output).
     Expect("produces valid Go code").
     Expect("handles errors idiomatically").
-    Snapshot().  // enable snapshot mode
+    Snapshot().
     Run()
 ```
 
@@ -186,49 +113,9 @@ SENSE_UPDATE_SNAPSHOTS=1 go test ./...
 - `SENSE_UPDATE_SNAPSHOTS=1` overwrites the snapshot file with current results
 - Snapshot dir defaults to `.snapshots/` relative to test file, configurable via `Config`
 
-### JUnit XML Reporter
+### Multi-Judge Consensus
 
-Standard CI output format that every CI system on earth can ingest.
-
-**API:**
-
-```go
-s := sense.New(sense.WithReporter(sense.NewJUnitReporter("sense-results.xml")))
-defer s.Close() // flushes report on close
-```
-
-**What to build:**
-
-- `Reporter` interface: `Record(testName string, result EvalResult)`, `Flush() error`
-- `JUnitReporter` implementation: accumulates results, writes JUnit XML on `Flush()`
-- Each eval maps to a JUnit test case. Failed checks become failure elements with reason + evidence
-- Session calls `Reporter.Record()` after every eval/assert
-- `Close()` calls `Reporter.Flush()` automatically
-- Score and confidence go into JUnit properties for trend tracking
-
-### GitHub Actions Annotations
-
-Optional, zero-config. Detect `GITHUB_ACTIONS=true` and emit annotations.
-
-**What to build:**
-
-- `GitHubReporter` implementation of `Reporter`
-- Emits `::error file=...,line=...::` and `::warning file=...,line=...::` to stdout
-- Failed checks → error annotations. Low-confidence passes → warning annotations
-- Auto-enabled when `GITHUB_ACTIONS=true` unless explicitly disabled
-- Shows inline on PRs — reviewer sees exactly which eval checks failed
-
-**Why it matters (all three):**
-
-You change a system prompt, run your evals, everything passes. But did quality actually degrade? Without snapshots you'd never know that "handles errors idiomatically" went from 0.95 confidence to 0.60. Snapshots make regressions visible. JUnit XML makes them visible *in CI*. GitHub annotations make them visible *on the PR*. This is what turns sense from "a tool I run locally" to "part of our quality gate."
-
----
-
-## v0.5: Multi-Judge Consensus
-
-Run the same evaluation against multiple models. Require agreement for a pass. Ship this after caching exists (so 3x calls isn't 3x cost on cache-warm runs) and after CI integration (so consensus results show up in reports).
-
-**API:**
+Run the same evaluation against multiple models. Require agreement for a pass.
 
 ```go
 s := sense.New(sense.WithConsensus(
@@ -236,12 +123,10 @@ s := sense.New(sense.WithConsensus(
     "claude-sonnet-4-6", "claude-haiku-4-5-20251001",
 ))
 
-// Same API — consensus is transparent
 result, err := s.Eval(output).
     Expect("is factually accurate").
     Judge()
 
-// Result includes per-model breakdown
 for _, j := range result.Judgments {
     fmt.Printf("%s: pass=%v score=%.2f\n", j.Model, j.Pass, j.Score)
 }
@@ -264,21 +149,50 @@ for _, j := range result.Judgments {
 - `EvalResult` gets a `Judgments []ModelJudgment` field for per-model breakdown
 - Works with both individual calls and batching
 
-**Why it matters:**
-
-A single model can have blind spots. Haiku might miss a subtle factual error that Sonnet catches. Running both and requiring agreement gives you higher confidence in your evals. The cost is 2-3x but the reliability gain is significant for critical assertions. With caching and prompt caching already in place, the cost multiplier is blunted.
-
 ---
 
-## Slot into any release
+## Dataset & Scale
 
-These are smaller features that can ship alongside any version.
+### Dataset Runner
 
-### ExtractSlice[T] — extract multiple items from one text
+Run the same eval across N inputs from a file and aggregate results. Without this, you're testing 5 handpicked examples and hoping they generalize.
 
-Right now Extract returns a single `T`. Real-world extraction often produces a list.
+```go
+sense.Dataset("testdata/summarization.jsonl").
+    ForEach(func(d sense.DataPoint) {
+        s.Assert(t, myLLM(d.Input)).
+            Expect(d.Expected).Run()
+    }).
+    Report()  // "87/100 passed, 3 regressions from last run"
+```
 
-**API:**
+**What to build:**
+
+- `Dataset(path)` loader — supports JSONL, CSV, JSON array
+- `DataPoint` struct: `Input`, `Expected`, `Metadata map[string]string`
+- `ForEach` runs the eval function against every data point
+- `Report()` aggregates: total, passed, failed, pass rate, regressions from last snapshot
+- Integrates with snapshots — dataset results are snapshot-able as a whole
+- Configurable concurrency for parallel execution across data points
+
+### Parallel Eval Execution
+
+Run N evals concurrently with rate limiting. Users shouldn't have to manage goroutines + semaphores themselves.
+
+```go
+s := sense.New(sense.WithConcurrency(10))  // max 10 concurrent API calls
+```
+
+**What to build:**
+
+- `WithConcurrency(n)` option — semaphore on the caller layer
+- Rate-limit aware — back off on 429s globally, not per-goroutine
+- Works transparently with Dataset runner
+- Default: sequential (concurrency = 1) to preserve current behavior
+
+### ExtractSlice[T]
+
+Extract a list of items from one text. Invoices have line items. Logs have multiple events. Emails have multiple entities.
 
 ```go
 type LineItem struct {
@@ -302,55 +216,13 @@ for _, item := range results.Data {
 - Same builder methods: `Context()`, `Model()`, `Validate()`, `Run()`, `RunContext()`
 - Validate runs on each item individually
 
-**Why it matters:**
+---
 
-Invoices have line items. Logs have multiple events. Emails have multiple entities. Forcing users to wrap their struct in a slice-holder struct is friction that a first-class `ExtractSlice` eliminates.
+## Cost & Safety
 
-### Session Interface — make sense mockable
+### Cost Budget
 
-Session is a struct. Users who embed sense in production code can't mock it for unit tests without hitting the real API or using `SENSE_SKIP=1` (which tests nothing).
-
-**API:**
-
-```go
-// Evaluator is the interface satisfied by Session.
-// Use this in function signatures to enable mocking.
-type Evaluator interface {
-    Assert(t testing.TB, output any) *AssertBuilder
-    Require(t testing.TB, output any) *AssertBuilder
-    Eval(output any) *EvalBuilder
-    Compare(a, b any) *CompareBuilder
-    Usage() SessionUsage
-    Close()
-}
-
-// In user code:
-func ProcessDocument(e sense.Evaluator, doc string) error {
-    result, err := e.Eval(doc).Expect("is complete").Judge()
-    // ...
-}
-
-// In user tests:
-type mockSense struct { /* ... */ }
-func (m *mockSense) Eval(output any) *sense.EvalBuilder { /* return canned */ }
-```
-
-**What to build:**
-
-- `Evaluator` interface matching the public methods on `Session`
-- `Session` already satisfies it — no code changes needed
-- Export in sense.go alongside the struct
-- Consider: does `Extract[T]()` being a package-level generic function (not a method) create friction here? May need `Extractor[T]` interface or accept that Extract mocking requires a different pattern
-
-**Why it matters:**
-
-Adoption blocker for teams. If my service uses sense in production (not just tests), I need to mock it in my unit tests. Right now I can't without the real API key. An interface costs nothing to add and unblocks every team that uses sense beyond `_test.go` files.
-
-### Cost Budget — fail if a session exceeds a threshold
-
-Prevent runaway costs, especially important with consensus (where misconfigured fan-out could 10x a bill).
-
-**API:**
+Prevent runaway costs. One bad loop or large dataset run can burn $50+ before you notice. Teams stop running evals when they can't predict cost.
 
 ```go
 s := sense.New(sense.WithMaxCost(sense.Dollars(0.50)))
@@ -365,15 +237,109 @@ s := sense.New(sense.WithMaxCost(sense.Dollars(0.50)))
 - Model pricing: hardcoded table, updatable. Start with Sonnet/Haiku/Opus pricing
 - `SessionUsage` gains an `EstimatedCost` field
 
-**Why it matters:**
+### FileCache
 
-In CI, a misconfigured test suite or a consensus fan-out can burn through API credits fast. A hard cap turns a $50 surprise into a $0.50 controlled failure. Simple to implement — one check after `recordUsage`, one pricing lookup table.
+Persist responses across runs. During iterative development, you re-evaluate the exact same prompt dozens of times. FileCache eliminates redundant API calls entirely.
+
+```go
+s := sense.New(sense.WithCache(sense.FileCache(".sense-cache")))
+```
+
+**What to build:**
+
+- Implement `FileCache.Get` and `FileCache.Set` (currently no-op stubs)
+- Cache key: SHA-256 of `(system_prompt, user_message, tool_schema, model)`
+- Storage: one file per cache entry, key as filename, response bytes as content
+- Wire cache into the `caller` layer — check cache before API call, store after
+- No TTL by default (LLM responses to identical inputs are stable). Optional `MaxAge` for staleness control
+
+### Anthropic Prompt Caching
+
+Use Anthropic's `cache_control` to reduce cost on repeated system prompts within a session. Transparent optimization — no API surface change.
+
+**What to build:**
+
+- Add `cache_control: {"type": "ephemeral"}` to the system message in `callRequest`
+- First call pays full price. Subsequent calls with the same system prompt pay 90% less for those tokens
+- No user-facing API change
+
+---
+
+## CI & Integration
+
+### JUnit XML Reporter
+
+Standard CI output format that every CI system can ingest.
+
+```go
+s := sense.New(sense.WithReporter(sense.NewJUnitReporter("sense-results.xml")))
+defer s.Close() // flushes report on close
+```
+
+**What to build:**
+
+- `Reporter` interface: `Record(testName string, result EvalResult)`, `Flush() error`
+- `JUnitReporter` implementation: accumulates results, writes JUnit XML on `Flush()`
+- Each eval maps to a JUnit test case. Failed checks become failure elements with reason + evidence
+- Session calls `Reporter.Record()` after every eval/assert
+- `Close()` calls `Reporter.Flush()` automatically
+
+### GitHub Actions Annotations
+
+Zero-config. Detect `GITHUB_ACTIONS=true` and emit annotations inline on PRs.
+
+**What to build:**
+
+- `GitHubReporter` implementation of `Reporter`
+- Emits `::error file=...,line=...::` and `::warning file=...,line=...::` to stdout
+- Failed checks -> error annotations. Low-confidence passes -> warning annotations
+- Auto-enabled when `GITHUB_ACTIONS=true` unless explicitly disabled
+
+### Multi-Model Judges
+
+Sense only works with Claude today. The `Caller` interface is already abstracted — adding an OpenAI implementation is ~100 lines. This unlocks:
+
+- Judge outputs from any model (already possible — it's just text input)
+- Judge *with* different models to cross-validate
+- Use Sense without an Anthropic API key
+
+**What to build:**
+
+- `OpenAICaller` implementing the `Caller` interface
+- `WithCaller(c Caller)` option to inject a custom caller
+- Same tool_use pattern via OpenAI's function calling
+- Enables multi-model consensus with heterogeneous judges
+
+---
+
+## API Surface
+
+### Session Interface
+
+Session is a struct. Users who embed Sense in production code can't mock it without the real API.
+
+```go
+type Evaluator interface {
+    Assert(t testing.TB, output any) *AssertBuilder
+    Require(t testing.TB, output any) *AssertBuilder
+    Eval(output any) *EvalBuilder
+    Compare(a, b any) *CompareBuilder
+    Usage() SessionUsage
+    Close()
+}
+```
+
+**What to build:**
+
+- `Evaluator` interface matching the public methods on `Session`
+- `Session` already satisfies it — no code changes needed
+- Export in sense.go alongside the struct
 
 ---
 
 ## Positioning: Extract as co-lead
 
-Not a code change — a narrative change. The README and package doc currently position sense as a testing tool that also does extraction. Extract is independently valuable for any Go program that processes unstructured text:
+Not a code change — a narrative change. The README currently positions Sense as a testing tool that also does extraction. Extract is independently valuable for any Go program that processes unstructured text:
 
 | Use case | Example |
 |----------|---------|
@@ -384,21 +350,4 @@ Not a code change — a narrative change. The README and package doc currently p
 | Migration tooling | Parse legacy config formats into new structs |
 | Monitoring | Extract error patterns from alert text |
 
-The forced `tool_use` approach is the differentiator — no prompt engineering, no JSON parsing, no "hope the model returns valid output." Struct tags as the schema definition is idiomatic Go.
-
 The README should lead with two tracks: **"Judge output"** (Assert/Eval/Compare) and **"Extract structure"** (Extract). Not "testing framework that also does extraction."
-
----
-
-## Build order summary
-
-| Version | Feature | Impact |
-|---------|---------|--------|
-| v0.1.0 | Cost Tracking | **Shipped** |
-| v0.2 | Custom Evaluators + Extract Validation | Highest immediate value. Enables validation pipelines. Saves API cost via fail-fast |
-| v0.3 | FileCache + Prompt Caching | Cut costs 50-90% during dev. Finish the stubbed FileCache |
-| v0.4 | Snapshots + JUnit Reporter + GH Annotations | Unlock CI adoption. Snapshots + reporting = quality gate |
-| v0.5 | Multi-Judge Consensus | Power feature. Ship when there's pull, after caching blunts the cost |
-| Any | ExtractSlice[T] | Natural extension, real demand, small scope |
-| Any | Session Interface | Small change, big adoption unblock |
-| Any | Cost Budget | Safety net, especially for consensus |
