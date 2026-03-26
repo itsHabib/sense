@@ -65,10 +65,9 @@ func TestNew_WithAPIKey(t *testing.T) {
 	}
 }
 
-func TestNew_WithCache(t *testing.T) {
-	c := MemoryCache()
-	s := New(WithCache(c))
-	if s.cache != c {
+func TestNew_WithMemoryCache(t *testing.T) {
+	s := New(WithMemoryCache())
+	if s.cache == nil {
 		t.Error("expected cache to be set")
 	}
 }

@@ -233,7 +233,7 @@ s := sense.New(
     sense.WithTimeout(10 * time.Second),
     sense.WithRetries(5),
     sense.WithAPIKey("sk-..."),
-    sense.WithCache(sense.MemoryCache()),
+    sense.WithMemoryCache(),
 )
 ```
 

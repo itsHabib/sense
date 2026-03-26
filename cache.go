@@ -1,6 +1,12 @@
 package sense
 
-import "sync"
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"sync"
+)
 
 // Cache stores and retrieves API responses by content-addressed key.
 type Cache interface {
@@ -12,27 +18,9 @@ type Cache interface {
 	Set(key string, data []byte)
 }
 
-// FileCache creates a disk-based cache at the given directory.
-// Not yet implemented — returns a no-op cache.
-// TODO: implement in Phase 2.
-func FileCache(dir string) Cache {
-	return &fileCache{dir: dir}
-}
-
 // MemoryCache creates an in-memory cache safe for concurrent use.
 func MemoryCache() Cache {
 	return &memoryCache{store: make(map[string][]byte)}
-}
-
-type fileCache struct {
-	dir string
-}
-
-func (c *fileCache) Get(_ string) ([]byte, bool) {
-	return nil, false
-}
-
-func (c *fileCache) Set(_ string, _ []byte) {
 }
 
 type memoryCache struct {
@@ -51,4 +39,52 @@ func (c *memoryCache) Set(key string, data []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.store[key] = data
+}
+
+// cachedCaller wraps a caller with a cache layer. On cache hit, the API
+// call is skipped entirely. On miss, the response is stored after a
+// successful call.
+type cachedCaller struct {
+	inner caller
+	cache Cache
+}
+
+// cacheEntry is the serialized form stored in the cache.
+type cacheEntry struct {
+	Raw   json.RawMessage `json:"raw"`
+	Usage *Usage          `json:"usage,omitempty"`
+}
+
+func (c *cachedCaller) call(ctx context.Context, req *callRequest) (json.RawMessage, *Usage, error) {
+	key := cacheKey(req)
+
+	if data, ok := c.cache.Get(key); ok {
+		var entry cacheEntry
+		if err := json.Unmarshal(data, &entry); err == nil {
+			return entry.Raw, entry.Usage, nil
+		}
+	}
+
+	raw, usage, err := c.inner.call(ctx, req)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	entry := cacheEntry{Raw: raw, Usage: usage}
+	if data, err := json.Marshal(entry); err == nil {
+		c.cache.Set(key, data)
+	}
+
+	return raw, usage, nil
+}
+
+func cacheKey(req *callRequest) string {
+	h := sha256.New()
+	for _, s := range []string{req.model, req.systemPrompt, req.userMessage, req.toolName} {
+		h.Write([]byte(s))
+		h.Write([]byte{'\n'})
+	}
+	schema, _ := json.Marshal(req.toolSchema)
+	h.Write(schema)
+	return hex.EncodeToString(h.Sum(nil))
 }

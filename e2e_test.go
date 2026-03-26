@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/itsHabib/sense"
 )
@@ -1089,4 +1090,55 @@ func TestExtractSlice_SkipMode(t *testing.T) {
 	if len(result.Data) != 0 {
 		t.Errorf("expected empty slice in skip mode, got %d items", len(result.Data))
 	}
+}
+
+// --- MemoryCache ---
+
+func TestMemoryCache_DeduplicatesCalls(t *testing.T) {
+	t.Parallel()
+
+	cached := sense.New(sense.WithMemoryCache())
+	defer cached.Close()
+
+	type mountErr struct {
+		Device   string `json:"device" sense:"The device path"`
+		VolumeID string `json:"volume_id" sense:"The EBS volume ID"`
+	}
+
+	text := "attach volume: device /dev/sdf is already in use by vol-0abc123def456"
+	ctx := "AWS EC2 EBS error messages"
+
+	// First call — cache miss, hits the API.
+	r1, err := sense.Extract[mountErr](text).Context(ctx).Run()
+	if err != nil {
+		t.Fatalf("uncached extract error: %v", err)
+	}
+	if r1.Data.Device == "" {
+		t.Fatal("expected device to be extracted")
+	}
+
+	// Two identical extractions through the cached session.
+	var m1, m2 mountErr
+	_, err = cached.Extract(text, &m1).Context(ctx).Run()
+	if err != nil {
+		t.Fatalf("cached extract 1 error: %v", err)
+	}
+	res2, err := cached.Extract(text, &m2).Context(ctx).Run()
+	if err != nil {
+		t.Fatalf("cached extract 2 error: %v", err)
+	}
+
+	// Both should return the same data.
+	if m1.Device != m2.Device || m1.VolumeID != m2.VolumeID {
+		t.Errorf("expected identical results, got %+v vs %+v", m1, m2)
+	}
+
+	// Second call should be near-instant (cached). The first call takes
+	// 1-3s for a real API round trip; a cache hit takes microseconds.
+	if res2.Duration > 100*time.Millisecond {
+		t.Errorf("expected cache hit to be fast, took %s", res2.Duration)
+	}
+
+	t.Logf("extracted: device=%s volume=%s (second call duration=%s)",
+		m1.Device, m1.VolumeID, res2.Duration)
 }

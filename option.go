@@ -56,10 +56,12 @@ func WithBatch(maxSize int, maxWait time.Duration) Option {
 	}
 }
 
-// WithCache sets the response cache.
-func WithCache(cache Cache) Option {
+// WithMemoryCache enables an in-memory response cache for the session.
+// Identical requests return the cached response instead of hitting the API.
+// The cache lives and dies with the session.
+func WithMemoryCache() Option {
 	return func(c *sessionConfig) {
-		c.cache = cache
+		c.cache = MemoryCache()
 	}
 }
 
@@ -99,13 +101,19 @@ func buildSession(cfg *sessionConfig) *Session {
 		cache:      cfg.cache,
 	}
 
+	var c caller
 	if cfg.batch != nil {
 		b := newBatcher(*cfg.batch, cfg.apiKey)
 		s.batcher = b
-		s.client = &batchCaller{batcher: b}
+		c = &batchCaller{batcher: b}
 	} else {
-		s.client = newClaudeClient(cfg.apiKey, s.maxRetries)
+		c = newClaudeClient(cfg.apiKey, s.maxRetries)
 	}
 
+	if cfg.cache != nil {
+		c = &cachedCaller{inner: c, cache: cfg.cache}
+	}
+
+	s.client = c
 	return s
 }

@@ -191,8 +191,8 @@ func (c *claudeClient) call(ctx context.Context, req *callRequest) (json.RawMess
 
 // Usage tracks token consumption for a single call.
 type Usage struct {
-	InputTokens  int
-	OutputTokens int
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
 }
 
 // isRetryable reports whether the error is a transient API error
