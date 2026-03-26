@@ -312,31 +312,6 @@ Sense only works with Claude today. The `Caller` interface is already abstracted
 
 ---
 
-## API Surface
-
-### Session Interface
-
-Session is a struct. Users who embed Sense in production code can't mock it without the real API.
-
-```go
-type Evaluator interface {
-    Assert(t testing.TB, output any) *AssertBuilder
-    Require(t testing.TB, output any) *AssertBuilder
-    Eval(output any) *EvalBuilder
-    Compare(a, b any) *CompareBuilder
-    Usage() SessionUsage
-    Close()
-}
-```
-
-**What to build:**
-
-- `Evaluator` interface matching the public methods on `Session`
-- `Session` already satisfies it — no code changes needed
-- Export in sense.go alongside the struct
-
----
-
 ## Positioning: Extract as co-lead
 
 Not a code change — a narrative change. The README currently positions Sense as a testing tool that also does extraction. Extract is independently valuable for any Go program that processes unstructured text:

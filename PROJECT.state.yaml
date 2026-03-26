@@ -116,11 +116,3 @@ tracks:
       multi-model-judges:
         status: next
         notes: "OpenAI caller implementation, judge with any model"
-
-  api-surface:
-    description: "Session interface for mocking"
-    status: pending
-    phases:
-      session-interface:
-        status: next
-        notes: "Evaluator interface — mock Sense without API key"
