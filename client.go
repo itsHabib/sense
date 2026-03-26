@@ -142,7 +142,10 @@ func (c *claudeClient) call(ctx context.Context, req *callRequest) (json.RawMess
 		Model:     req.model,
 		MaxTokens: 4096,
 		System: []anthropic.TextBlockParam{
-			{Text: req.systemPrompt},
+			{
+				Text:         req.systemPrompt,
+				CacheControl: anthropic.NewCacheControlEphemeralParam(),
+			},
 		},
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(req.userMessage)),
