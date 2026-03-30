@@ -100,6 +100,62 @@ result, err := sense.ExtractSlice[LineItem](text).
     Run()
 ```
 
+### Validation
+
+All extract paths support two kinds of validation:
+
+**Closure** — pass a function via `.Validate(fn)`:
+
+```go
+result, err := sense.Extract[Order](text).
+    Validate(func(o Order) error {
+        if o.Total < 0 {
+            return fmt.Errorf("invalid total: %f", o.Total)
+        }
+        return nil
+    }).
+    Run()
+```
+
+**Interface** — implement `Validate() error` on your struct:
+
+```go
+type Order struct {
+    Total float64 `json:"total"`
+    Items []Item  `json:"items"`
+}
+
+func (o *Order) Validate() error {
+    if o.Total < 0 {
+        return fmt.Errorf("invalid total: %f", o.Total)
+    }
+    return nil
+}
+
+// Validate() is called automatically after unmarshalling.
+result, err := sense.Extract[Order](text).Run()
+```
+
+Both work with `Extract[T]`, `Extract(text, &dest)`, and `ExtractSlice[T]`. When both are set, the closure runs first.
+
+### Fallback
+
+All extract builders support a fallback function for when the API call fails:
+
+```go
+result, err := sense.Extract[MountError](logLine).
+    Fallback(func() (*MountError, error) {
+        return regexParseMountError(logLine)
+    }).
+    Run()
+
+if result.Fallback {
+    log.Warn("used fallback parser")
+}
+```
+
+The `Fallback` field on the result is `true` when the fallback path fired.
+
 ### Use cases
 
 Extract isn't just for tests. Use it anywhere you need structure from messy text:
@@ -292,6 +348,12 @@ SENSE_SKIP=1 go test ./...
 
 All `Assert`, `Require`, `Eval`, `Extract`, `ExtractSlice`, and `Compare` calls become no-ops that pass immediately.
 
+`sense.Nop()` also accepts options for cases where you want a no-op session with specific configuration (e.g., model name in result metadata, logging):
+
+```go
+s := sense.Nop(sense.WithModel("claude-haiku-4-5-20251001"), sense.WithLogger(logger))
+```
+
 ## Interfaces
 
 Sense provides two interfaces for decoupling your code from the concrete Session:
@@ -338,7 +400,7 @@ No prompt engineering. No JSON parsing. No "hope the model returns valid output.
 ## What's Next
 
 - [ ] **Deterministic checks** — mix `Check(sense.ValidJSON())` with LLM-judged `Expect()` in the same assertion. Deterministic checks run first; if any fail, skip the LLM call. Free, fast, saves money.
-- [ ] **Extract validation** — `Validate(func(T) error)` on single `Extract[T]`. Already available on `ExtractSlice[T]`.
+- [x] **Extract validation** — `Validate(func(T) error)` and `Validator` interface on all extract paths.
 - [ ] **File cache** — cache responses to disk. Identical prompts during iterative development hit the cache instead of the API.
 - [ ] **Prompt caching** — use Anthropic's `cache_control` to reduce cost on repeated system prompts within a session.
 - [ ] **Snapshots** — save eval results to disk, detect regressions when prompts change. `SENSE_UPDATE_SNAPSHOTS=1` to update.
