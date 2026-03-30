@@ -42,6 +42,13 @@ func (s *Session) Extract(text string, dest any) *ExtractIntoBuilder {
 	}
 }
 
+// Validator is an optional interface that extraction destination structs
+// can implement. If dest implements Validator, sense calls Validate()
+// automatically after unmarshalling.
+type Validator interface {
+	Validate() error
+}
+
 // ExtractIntoBuilder constructs and executes a structured extraction
 // using the json.Unmarshal pattern. The extracted data is written
 // directly into the dest pointer passed to Extract.
@@ -53,7 +60,6 @@ type ExtractIntoBuilder struct {
 	model      string
 	timeout    time.Duration
 	timeoutSet bool
-	validate   func() error
 	fallback   func() error
 }
 
@@ -73,13 +79,6 @@ func (b *ExtractIntoBuilder) Model(model string) *ExtractIntoBuilder {
 func (b *ExtractIntoBuilder) Timeout(d time.Duration) *ExtractIntoBuilder {
 	b.timeout = d
 	b.timeoutSet = true
-	return b
-}
-
-// Validate sets a function that runs after extraction to validate the result.
-// The function should inspect the dest pointer passed to Extract. Chainable.
-func (b *ExtractIntoBuilder) Validate(fn func() error) *ExtractIntoBuilder {
-	b.validate = fn
 	return b
 }
 
@@ -163,8 +162,8 @@ func (b *ExtractIntoBuilder) RunContext(ctx context.Context) (*ExtractIntoResult
 		return nil, &Error{Op: "extract", Message: "failed to parse result", Err: err}
 	}
 
-	if b.validate != nil {
-		if err := b.validate(); err != nil {
+	if v, ok := b.dest.(Validator); ok {
+		if err := v.Validate(); err != nil {
 			return nil, &Error{Op: "extract", Message: "validation failed", Err: err}
 		}
 	}
