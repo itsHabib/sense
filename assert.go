@@ -3,6 +3,7 @@ package sense
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // AssertBuilder constructs and executes a test assertion.
@@ -28,6 +29,20 @@ func (b *AssertBuilder) Context(ctx string) *AssertBuilder {
 // Model overrides the judge model for this assertion.
 func (b *AssertBuilder) Model(model string) *AssertBuilder {
 	b.eval.Model(model)
+	return b
+}
+
+// Timeout overrides the per-call timeout for this assertion.
+func (b *AssertBuilder) Timeout(d time.Duration) *AssertBuilder {
+	b.eval.Timeout(d)
+	return b
+}
+
+// MinConfidence sets the minimum confidence threshold for this assertion.
+// Checks that pass Claude's judgment but fall below this threshold are
+// treated as failures.
+func (b *AssertBuilder) MinConfidence(threshold float64) *AssertBuilder {
+	b.eval.MinConfidence(threshold)
 	return b
 }
 

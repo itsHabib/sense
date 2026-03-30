@@ -21,11 +21,12 @@ type EvalResult struct {
 
 // Check is a single expectation evaluation.
 type Check struct {
-	Expect     string  `json:"expect"`
-	Pass       bool    `json:"pass"`
-	Confidence float64 `json:"confidence"`
-	Reason     string  `json:"reason"`
-	Evidence   string  `json:"evidence,omitempty"`
+	Expect         string  `json:"expect"`
+	Pass           bool    `json:"pass"`
+	Confidence     float64 `json:"confidence"`
+	Reason         string  `json:"reason"`
+	Evidence       string  `json:"evidence,omitempty"`
+	BelowThreshold bool    `json:"below_threshold,omitempty"`
 }
 
 // FailedChecks returns only the checks that failed.
@@ -59,7 +60,9 @@ func (r *EvalResult) String() string {
 	fmt.Fprintf(&b, "evaluation: %d/%d passed, score: %.2f\n", passed, total, r.Score)
 
 	for _, c := range r.Checks {
-		if c.Pass {
+		if c.BelowThreshold {
+			fmt.Fprintf(&b, "\n    \u2717 %s\n", c.Expect)
+		} else if c.Pass {
 			fmt.Fprintf(&b, "\n    \u2713 %s\n", c.Expect)
 		} else {
 			fmt.Fprintf(&b, "\n    \u2717 %s\n", c.Expect)
@@ -68,7 +71,11 @@ func (r *EvalResult) String() string {
 		if c.Evidence != "" {
 			fmt.Fprintf(&b, "      evidence: %s\n", c.Evidence)
 		}
-		fmt.Fprintf(&b, "      confidence: %.2f\n", c.Confidence)
+		if c.BelowThreshold {
+			fmt.Fprintf(&b, "      confidence: %.2f (below threshold)\n", c.Confidence)
+		} else {
+			fmt.Fprintf(&b, "      confidence: %.2f\n", c.Confidence)
+		}
 	}
 
 	return b.String()
@@ -81,6 +88,11 @@ type EvalBuilder struct {
 	expectations []string
 	context      string
 	model        string
+	timeout      time.Duration
+	timeoutSet   bool
+
+	minConfidence    float64
+	minConfidenceSet bool
 }
 
 // Expect adds a natural language expectation. Chainable.
@@ -98,6 +110,22 @@ func (b *EvalBuilder) Context(ctx string) *EvalBuilder {
 // Model overrides the judge model for this evaluation.
 func (b *EvalBuilder) Model(model string) *EvalBuilder {
 	b.model = model
+	return b
+}
+
+// Timeout overrides the per-call timeout for this evaluation.
+func (b *EvalBuilder) Timeout(d time.Duration) *EvalBuilder {
+	b.timeout = d
+	b.timeoutSet = true
+	return b
+}
+
+// MinConfidence sets the minimum confidence threshold for this evaluation.
+// Checks that pass Claude's judgment but fall below this threshold are
+// treated as failures. Overrides the session-level WithMinConfidence default.
+func (b *EvalBuilder) MinConfidence(threshold float64) *EvalBuilder {
+	b.minConfidence = threshold
+	b.minConfidenceSet = true
 	return b
 }
 
@@ -121,9 +149,21 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 	}
 
 	outputStr := serializeOutput(b.output)
-	userMsg := buildEvalUserMessage(outputStr, b.expectations, b.context)
 
-	timeout := b.session.timeout
+	evalCtx := b.context
+	if b.session.context != "" {
+		if evalCtx != "" {
+			evalCtx = b.session.context + "\n" + evalCtx
+		} else {
+			evalCtx = b.session.context
+		}
+	}
+	userMsg := buildEvalUserMessage(outputStr, b.expectations, evalCtx)
+
+	timeout := b.timeout
+	if !b.timeoutSet {
+		timeout = b.session.timeout
+	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -160,6 +200,36 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
 		result.Usage = *usage
 	}
+
+	// Apply confidence threshold.
+	threshold := b.minConfidence
+	if !b.minConfidenceSet {
+		threshold = b.session.minConfidence
+	}
+	if threshold > 0 {
+		allPass := true
+		passCount := 0
+		for i := range result.Checks {
+			if result.Checks[i].Pass && result.Checks[i].Confidence < threshold {
+				result.Checks[i].BelowThreshold = true
+				allPass = false
+			} else if result.Checks[i].Pass {
+				passCount++
+			}
+		}
+		result.Pass = allPass
+		if len(result.Checks) > 0 {
+			result.Score = float64(passCount) / float64(len(result.Checks))
+		}
+	}
+
+	b.session.emit(Event{
+		Op:       "eval",
+		Model:    model,
+		Duration: result.Duration,
+		Tokens:   result.TokensUsed,
+		Usage:    usage,
+	})
 
 	return &result, nil
 }

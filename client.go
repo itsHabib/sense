@@ -163,6 +163,9 @@ func (c *claudeClient) call(ctx context.Context, req *callRequest) (json.RawMess
 	for attempt := range maxRetries {
 		message, err := c.client.Messages.New(ctx, params)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, nil, fmt.Errorf("%w: %w", ErrTimeout, ctx.Err())
+			}
 			if isRetryable(err) && attempt < maxRetries-1 {
 				lastErr = err
 				backoff(ctx, attempt)

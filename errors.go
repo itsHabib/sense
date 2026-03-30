@@ -9,6 +9,9 @@ var (
 	// ErrRateLimit is returned when the API rate limits the request after all retries.
 	ErrRateLimit = errors.New("sense: rate limited after all retries")
 
+	// ErrTimeout is returned when a call exceeds its deadline.
+	ErrTimeout = errors.New("sense: request timed out")
+
 	// ErrNoToolCall is returned when the model response contains no tool call.
 	ErrNoToolCall = errors.New("sense: model did not produce a tool call")
 
@@ -20,6 +23,9 @@ var (
 
 	// ErrNoText is returned when Extract is called with empty text.
 	ErrNoText = errors.New("sense: no text provided for extraction")
+
+	// ErrBudgetExceeded is returned when the session cost budget has been exhausted.
+	ErrBudgetExceeded = errors.New("sense: cost budget exceeded")
 )
 
 // Error wraps an underlying error with operation context.

@@ -20,12 +20,15 @@ type ExtractSliceResult[T any] struct {
 // ExtractSliceBuilder constructs and executes a structured extraction
 // that returns a slice of typed structs from a single text input.
 type ExtractSliceBuilder[T any] struct {
-	session  *Session
-	text     string
-	context  string
-	model    string
-	schema   anthropic.ToolInputSchemaParam
-	validate func(T) error
+	session    *Session
+	text       string
+	context    string
+	model      string
+	schema     anthropic.ToolInputSchemaParam
+	validate   func(T) error
+	timeout    time.Duration
+	timeoutSet bool
+	fallback   func() ([]T, error)
 }
 
 // ExtractSlice creates a builder that extracts a list of typed structs from
@@ -74,6 +77,19 @@ func (b *ExtractSliceBuilder[T]) Validate(fn func(T) error) *ExtractSliceBuilder
 	return b
 }
 
+// Timeout overrides the per-call timeout for this extraction. Chainable.
+func (b *ExtractSliceBuilder[T]) Timeout(d time.Duration) *ExtractSliceBuilder[T] {
+	b.timeout = d
+	b.timeoutSet = true
+	return b
+}
+
+// Fallback sets a function to call when extraction fails. Chainable.
+func (b *ExtractSliceBuilder[T]) Fallback(fn func() ([]T, error)) *ExtractSliceBuilder[T] {
+	b.fallback = fn
+	return b
+}
+
 // Run executes the extraction and returns the result.
 func (b *ExtractSliceBuilder[T]) Run() (*ExtractSliceResult[T], error) {
 	return b.RunContext(context.Background())
@@ -89,9 +105,20 @@ func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceR
 		return &ExtractSliceResult[T]{Data: []T{}}, nil
 	}
 
-	userMsg := buildExtractUserMessage(b.text, b.context)
+	extCtx := b.context
+	if b.session.context != "" {
+		if extCtx != "" {
+			extCtx = b.session.context + "\n" + extCtx
+		} else {
+			extCtx = b.session.context
+		}
+	}
+	userMsg := buildExtractUserMessage(b.text, extCtx)
 
-	timeout := b.session.timeout
+	timeout := b.timeout
+	if !b.timeoutSet {
+		timeout = b.session.timeout
+	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -114,6 +141,14 @@ func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceR
 	})
 	b.session.recordUsage(usage)
 	if err != nil {
+		b.session.emit(Event{Op: "extract_slice", Model: model, Duration: time.Since(start), Err: err})
+		if b.fallback != nil {
+			data, fbErr := b.fallback()
+			if fbErr != nil {
+				return nil, &Error{Op: "extract_slice", Message: "fallback failed", Err: fbErr}
+			}
+			return &ExtractSliceResult[T]{Data: data, Duration: time.Since(start), Model: model}, nil
+		}
 		return nil, &Error{Op: "extract_slice", Message: "api call failed", Err: err}
 	}
 
@@ -136,6 +171,14 @@ func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceR
 	if usage != nil {
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
 	}
+
+	b.session.emit(Event{
+		Op:       "extract_slice",
+		Model:    model,
+		Duration: result.Duration,
+		Tokens:   result.TokensUsed,
+		Usage:    usage,
+	})
 
 	return result, nil
 }

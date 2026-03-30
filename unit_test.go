@@ -447,6 +447,177 @@ func TestError_NoWrapped(t *testing.T) {
 	}
 }
 
+// --- Confidence threshold ---
+
+func TestEval_MinConfidence_SessionLevel(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{
+			"pass": true,
+			"score": 1.0,
+			"checks": [
+				{"expect": "is clear", "pass": true, "confidence": 0.45, "reason": "somewhat"},
+				{"expect": "is concise", "pass": true, "confidence": 0.9, "reason": "yes"}
+			]
+		}`),
+		usage: &Usage{InputTokens: 100, OutputTokens: 50},
+	}
+	s := testSession(mock)
+	s.minConfidence = 0.7
+
+	result, err := s.Eval("test").
+		Expect("is clear").
+		Expect("is concise").
+		Judge()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Pass {
+		t.Error("expected fail — first check below threshold")
+	}
+	if !result.Checks[0].BelowThreshold {
+		t.Error("expected first check to be marked BelowThreshold")
+	}
+	if result.Checks[1].BelowThreshold {
+		t.Error("expected second check NOT BelowThreshold")
+	}
+	if result.Score != 0.5 {
+		t.Errorf("expected score 0.5, got %.2f", result.Score)
+	}
+}
+
+func TestEval_MinConfidence_BuilderOverride(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{
+			"pass": true,
+			"score": 1.0,
+			"checks": [
+				{"expect": "ok", "pass": true, "confidence": 0.5, "reason": "fine"}
+			]
+		}`),
+		usage: &Usage{InputTokens: 50, OutputTokens: 50},
+	}
+	s := testSession(mock)
+	s.minConfidence = 0.8 // session says 0.8
+
+	// Builder overrides to 0.4, so 0.5 confidence should pass.
+	result, err := s.Eval("test").
+		Expect("ok").
+		MinConfidence(0.4).
+		Judge()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Pass {
+		t.Error("expected pass — builder threshold 0.4 overrides session 0.8")
+	}
+}
+
+func TestEval_MinConfidence_Zero_NoEffect(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{
+			"pass": true,
+			"score": 1.0,
+			"checks": [
+				{"expect": "ok", "pass": true, "confidence": 0.1, "reason": "guess"}
+			]
+		}`),
+		usage: &Usage{InputTokens: 50, OutputTokens: 50},
+	}
+	s := testSession(mock)
+
+	result, err := s.Eval("test").
+		Expect("ok").
+		Judge()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Pass {
+		t.Error("expected pass — no threshold set")
+	}
+}
+
+func TestEvalResult_String_BelowThreshold(t *testing.T) {
+	r := &EvalResult{
+		Pass:  false,
+		Score: 0.0,
+		Checks: []Check{
+			{Expect: "is good", Pass: true, Confidence: 0.3, Reason: "maybe", BelowThreshold: true},
+		},
+	}
+	s := r.String()
+	if !contains(s, "below threshold") {
+		t.Errorf("expected 'below threshold' in output:\n%s", s)
+	}
+}
+
+// --- Session context ---
+
+func TestEval_SessionContext(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{"pass": true, "score": 1.0, "checks": []}`),
+		usage:    &Usage{},
+	}
+	s := testSession(mock)
+	s.context = "global context"
+
+	_, _ = s.Eval("output").
+		Expect("something").
+		Context("call context").
+		Judge()
+
+	if mock.lastReq == nil {
+		t.Fatal("expected a call")
+	}
+	msg := mock.lastReq.userMessage
+	if !contains(msg, "global context") {
+		t.Error("expected session context in prompt")
+	}
+	if !contains(msg, "call context") {
+		t.Error("expected per-call context in prompt")
+	}
+}
+
+// --- Nop session ---
+
+func TestNop_Extract(t *testing.T) {
+	s := Nop()
+	type dst struct {
+		Name string `json:"name"`
+	}
+	var d dst
+	_, err := s.Extract("some text", &d).Run()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNop_Eval(t *testing.T) {
+	s := Nop()
+	result, err := s.Eval("anything").Expect("something").Judge()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Nop returns empty JSON which means pass=false, score=0 — that's fine,
+	// the point is it doesn't error or call the API.
+	_ = result
+}
+
+// --- Cost awareness ---
+
+func TestSessionUsage_EstimatedCost(t *testing.T) {
+	s := New(WithAPIKey("fake"))
+	s.recordUsage(&Usage{InputTokens: 1000, OutputTokens: 500})
+
+	u := s.Usage()
+	if u.EstimatedCost == 0 {
+		t.Error("expected non-zero estimated cost")
+	}
+	str := u.String()
+	if !contains(str, "$") {
+		t.Errorf("expected dollar sign in usage string: %s", str)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }

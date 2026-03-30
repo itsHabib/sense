@@ -1,6 +1,7 @@
 package sense
 
 import (
+	"log/slog"
 	"os"
 	"time"
 )
@@ -16,11 +17,18 @@ type sessionConfig struct {
 	maxRetries int
 	cache      Cache
 	batch      *BatchConfig
+	context    string
+
+	minConfidence    float64
+	minConfidenceSet bool
 
 	// sentinels: track whether the caller explicitly set timeout/retries,
 	// so we can distinguish "not set" from "set to zero".
 	timeoutSet    bool
 	maxRetriesSet bool
+
+	logger *slog.Logger
+	hook   func(Event)
 }
 
 // WithModel sets the Claude model for evaluations.
@@ -72,6 +80,39 @@ func WithAPIKey(key string) Option {
 	}
 }
 
+// WithMinConfidence sets a session-level minimum confidence threshold.
+// Checks that pass Claude's judgment but fall below this threshold are
+// treated as failures. Per-call MinConfidence overrides this default.
+func WithMinConfidence(threshold float64) Option {
+	return func(c *sessionConfig) {
+		c.minConfidence = threshold
+		c.minConfidenceSet = true
+	}
+}
+
+// WithContext sets a session-level context string that is prepended to
+// every evaluation and extraction call. Per-call Context appends to it.
+func WithContext(ctx string) Option {
+	return func(c *sessionConfig) {
+		c.context = ctx
+	}
+}
+
+// WithLogger sets a structured logger for the session. When set, sense
+// logs API calls, latencies, token usage, and errors.
+func WithLogger(l *slog.Logger) Option {
+	return func(c *sessionConfig) {
+		c.logger = l
+	}
+}
+
+// WithHook sets a callback invoked after every API call with event details.
+func WithHook(fn func(Event)) Option {
+	return func(c *sessionConfig) {
+		c.hook = fn
+	}
+}
+
 func applyDefaults(cfg *sessionConfig) {
 	if cfg.model == "" {
 		cfg.model = "claude-sonnet-4-6"
@@ -95,10 +136,14 @@ func applyDefaults(cfg *sessionConfig) {
 
 func buildSession(cfg *sessionConfig) *Session {
 	s := &Session{
-		model:      cfg.model,
-		timeout:    cfg.timeout,
-		maxRetries: cfg.maxRetries,
-		cache:      cfg.cache,
+		model:         cfg.model,
+		timeout:       cfg.timeout,
+		maxRetries:    cfg.maxRetries,
+		cache:         cfg.cache,
+		context:       cfg.context,
+		minConfidence: cfg.minConfidence,
+		logger:        cfg.logger,
+		hook:          cfg.hook,
 	}
 
 	var c caller

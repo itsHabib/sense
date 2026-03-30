@@ -45,12 +45,14 @@ func (r *CompareResult) String() string {
 
 // CompareBuilder constructs and executes an A/B comparison.
 type CompareBuilder struct {
-	session  *Session
-	outputA  any
-	outputB  any
-	criteria []string
-	context  string
-	model    string
+	session    *Session
+	outputA    any
+	outputB    any
+	criteria   []string
+	context    string
+	model      string
+	timeout    time.Duration
+	timeoutSet bool
 }
 
 // Criteria adds a comparison dimension. Chainable.
@@ -71,6 +73,13 @@ func (b *CompareBuilder) Model(model string) *CompareBuilder {
 	return b
 }
 
+// Timeout overrides the per-call timeout for this comparison.
+func (b *CompareBuilder) Timeout(d time.Duration) *CompareBuilder {
+	b.timeout = d
+	b.timeoutSet = true
+	return b
+}
+
 // Judge executes the comparison.
 func (b *CompareBuilder) Judge() (*CompareResult, error) {
 	return b.JudgeContext(context.Background())
@@ -88,9 +97,21 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 
 	outputA := serializeOutput(b.outputA)
 	outputB := serializeOutput(b.outputB)
-	userMsg := buildCompareUserMessage(outputA, outputB, b.criteria, b.context)
 
-	timeout := b.session.timeout
+	cmpCtx := b.context
+	if b.session.context != "" {
+		if cmpCtx != "" {
+			cmpCtx = b.session.context + "\n" + cmpCtx
+		} else {
+			cmpCtx = b.session.context
+		}
+	}
+	userMsg := buildCompareUserMessage(outputA, outputB, b.criteria, cmpCtx)
+
+	timeout := b.timeout
+	if !b.timeoutSet {
+		timeout = b.session.timeout
+	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -127,6 +148,14 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
 		result.Usage = *usage
 	}
+
+	b.session.emit(Event{
+		Op:       "compare",
+		Model:    model,
+		Duration: result.Duration,
+		Tokens:   result.TokensUsed,
+		Usage:    usage,
+	})
 
 	return &result, nil
 }

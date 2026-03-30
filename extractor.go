@@ -46,11 +46,15 @@ func (s *Session) Extract(text string, dest any) *ExtractIntoBuilder {
 // using the json.Unmarshal pattern. The extracted data is written
 // directly into the dest pointer passed to Extract.
 type ExtractIntoBuilder struct {
-	session *Session
-	text    string
-	dest    any
-	context string
-	model   string
+	session    *Session
+	text       string
+	dest       any
+	context    string
+	model      string
+	timeout    time.Duration
+	timeoutSet bool
+	validate   func() error
+	fallback   func() error
 }
 
 // Context adds background information to guide extraction. Chainable.
@@ -62,6 +66,27 @@ func (b *ExtractIntoBuilder) Context(ctx string) *ExtractIntoBuilder {
 // Model overrides the model for this extraction. Chainable.
 func (b *ExtractIntoBuilder) Model(model string) *ExtractIntoBuilder {
 	b.model = model
+	return b
+}
+
+// Timeout overrides the per-call timeout for this extraction. Chainable.
+func (b *ExtractIntoBuilder) Timeout(d time.Duration) *ExtractIntoBuilder {
+	b.timeout = d
+	b.timeoutSet = true
+	return b
+}
+
+// Validate sets a function that runs after extraction to validate the result.
+// The function should inspect the dest pointer passed to Extract. Chainable.
+func (b *ExtractIntoBuilder) Validate(fn func() error) *ExtractIntoBuilder {
+	b.validate = fn
+	return b
+}
+
+// Fallback sets a function to call when extraction fails. The function
+// should populate the dest pointer directly. Chainable.
+func (b *ExtractIntoBuilder) Fallback(fn func() error) *ExtractIntoBuilder {
+	b.fallback = fn
 	return b
 }
 
@@ -87,9 +112,21 @@ func (b *ExtractIntoBuilder) RunContext(ctx context.Context) (*ExtractIntoResult
 	}
 
 	schema := schemaForValue(b.dest)
-	userMsg := buildExtractUserMessage(b.text, b.context)
 
-	timeout := b.session.timeout
+	extCtx := b.context
+	if b.session.context != "" {
+		if extCtx != "" {
+			extCtx = b.session.context + "\n" + extCtx
+		} else {
+			extCtx = b.session.context
+		}
+	}
+	userMsg := buildExtractUserMessage(b.text, extCtx)
+
+	timeout := b.timeout
+	if !b.timeoutSet {
+		timeout = b.session.timeout
+	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -112,11 +149,24 @@ func (b *ExtractIntoBuilder) RunContext(ctx context.Context) (*ExtractIntoResult
 	})
 	b.session.recordUsage(usage)
 	if err != nil {
+		b.session.emit(Event{Op: "extract", Model: model, Duration: time.Since(start), Err: err})
+		if b.fallback != nil {
+			if fbErr := b.fallback(); fbErr != nil {
+				return nil, &Error{Op: "extract", Message: "fallback failed", Err: fbErr}
+			}
+			return &ExtractIntoResult{Duration: time.Since(start), Model: model}, nil
+		}
 		return nil, &Error{Op: "extract", Message: "api call failed", Err: err}
 	}
 
 	if err := json.Unmarshal(raw, b.dest); err != nil {
 		return nil, &Error{Op: "extract", Message: "failed to parse result", Err: err}
+	}
+
+	if b.validate != nil {
+		if err := b.validate(); err != nil {
+			return nil, &Error{Op: "extract", Message: "validation failed", Err: err}
+		}
 	}
 
 	result := &ExtractIntoResult{
@@ -126,6 +176,14 @@ func (b *ExtractIntoBuilder) RunContext(ctx context.Context) (*ExtractIntoResult
 	if usage != nil {
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
 	}
+
+	b.session.emit(Event{
+		Op:       "extract",
+		Model:    model,
+		Duration: result.Duration,
+		Tokens:   result.TokensUsed,
+		Usage:    usage,
+	})
 
 	return result, nil
 }
