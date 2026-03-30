@@ -32,8 +32,8 @@ func Dollars(n float64) float64 { return n }
 
 // Model pricing per million tokens (input, output).
 var modelPricing = map[string][2]float64{
-	"claude-sonnet-4-6":       {3.0, 15.0},
-	"claude-opus-4-6":         {15.0, 75.0},
+	"claude-sonnet-4-6":         {3.0, 15.0},
+	"claude-opus-4-6":           {15.0, 75.0},
 	"claude-haiku-4-5-20251001": {0.80, 4.0},
 }
 

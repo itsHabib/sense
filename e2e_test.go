@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 func TestAssert_PassesOnStructuredReport(t *testing.T) {
 	t.Parallel()
 
-	s.Assert(t,`
+	s.Assert(t, `
 # Quarterly Report
 
 ## Summary
@@ -58,7 +58,7 @@ Revenue grew 15% year-over-year to $4.2M. Customer churn decreased from 8% to 5%
 func TestAssert_PassesOnValidGoCode(t *testing.T) {
 	t.Parallel()
 
-	s.Assert(t,`
+	s.Assert(t, `
 package main
 
 import (
@@ -395,14 +395,14 @@ func TestCompare_NoCriteriaReturnsError(t *testing.T) {
 
 func TestSkipMode_Assert(t *testing.T) {
 	t.Setenv("SENSE_SKIP", "1")
-	s.Assert(t,"anything").
+	s.Assert(t, "anything").
 		Expect("impossible expectation").
 		Run()
 }
 
 func TestSkipMode_Require(t *testing.T) {
 	t.Setenv("SENSE_SKIP", "1")
-	s.Require(t,"anything").
+	s.Require(t, "anything").
 		Expect("impossible expectation").
 		Run()
 }
@@ -443,7 +443,7 @@ func TestSkipMode_CompareReturnsTie(t *testing.T) {
 func TestRequire_PassesOnValidInput(t *testing.T) {
 	t.Parallel()
 
-	s.Require(t,"Hello, world!").
+	s.Require(t, "Hello, world!").
 		Expect("contains a greeting").
 		Run()
 }

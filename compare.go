@@ -98,21 +98,9 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 	outputA := serializeOutput(b.outputA)
 	outputB := serializeOutput(b.outputB)
 
-	cmpCtx := b.context
-	if b.session.context != "" {
-		if cmpCtx != "" {
-			cmpCtx = b.session.context + "\n" + cmpCtx
-		} else {
-			cmpCtx = b.session.context
-		}
-	}
-	userMsg := buildCompareUserMessage(outputA, outputB, b.criteria, cmpCtx)
+	userMsg := buildCompareUserMessage(outputA, outputB, b.criteria, mergeContext(b.session.context, b.context))
 
-	timeout := b.timeout
-	if !b.timeoutSet {
-		timeout = b.session.timeout
-	}
-	if timeout > 0 {
+	if timeout := resolveTimeout(b.timeout, b.timeoutSet, b.session.timeout); timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()

@@ -42,53 +42,7 @@ func (s *Session) ExtractParallel(ctx context.Context, jobs []ExtractJob) *Extra
 		wg.Add(1)
 		go func(idx int, j ExtractJob) {
 			defer wg.Done()
-
-			if err := validateDest(j.Dest); err != nil {
-				errs[idx] = err
-				return
-			}
-
-			schema := schemaForValue(j.Dest)
-
-			extCtx := j.Context
-			if s.context != "" {
-				if extCtx != "" {
-					extCtx = s.context + "\n" + extCtx
-				} else {
-					extCtx = s.context
-				}
-			}
-			userMsg := buildExtractUserMessage(j.Text, extCtx)
-
-			model := j.Model
-			if model == "" {
-				model = s.getModel()
-			}
-
-			callCtx := ctx
-			if s.timeout > 0 {
-				var cancel context.CancelFunc
-				callCtx, cancel = context.WithTimeout(ctx, s.timeout)
-				defer cancel()
-			}
-
-			raw, usage, err := s.client.call(callCtx, &callRequest{
-				systemPrompt: extractSystemPrompt,
-				userMessage:  userMsg,
-				toolName:     "submit_extraction",
-				toolSchema:   schema,
-				model:        model,
-			})
-			s.recordUsage(usage)
-			if err != nil {
-				errs[idx] = &Error{Op: "extract", Message: "api call failed", Err: err}
-				return
-			}
-
-			if err := json.Unmarshal(raw, j.Dest); err != nil {
-				errs[idx] = &Error{Op: "extract", Message: "failed to parse result", Err: err}
-				return
-			}
+			errs[idx] = s.runExtractJob(ctx, j)
 		}(i, job)
 	}
 
@@ -97,4 +51,42 @@ func (s *Session) ExtractParallel(ctx context.Context, jobs []ExtractJob) *Extra
 		Errors:   errs,
 		Duration: time.Since(start),
 	}
+}
+
+func (s *Session) runExtractJob(ctx context.Context, j ExtractJob) error {
+	if err := validateDest(j.Dest); err != nil {
+		return err
+	}
+
+	schema := schemaForValue(j.Dest)
+	userMsg := buildExtractUserMessage(j.Text, mergeContext(s.context, j.Context))
+
+	model := j.Model
+	if model == "" {
+		model = s.getModel()
+	}
+
+	if s.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.timeout)
+		defer cancel()
+	}
+
+	raw, usage, err := s.client.call(ctx, &callRequest{
+		systemPrompt: extractSystemPrompt,
+		userMessage:  userMsg,
+		toolName:     "submit_extraction",
+		toolSchema:   schema,
+		model:        model,
+	})
+	s.recordUsage(usage)
+	if err != nil {
+		return &Error{Op: "extract", Message: "api call failed", Err: err}
+	}
+
+	if err := json.Unmarshal(raw, j.Dest); err != nil {
+		return &Error{Op: "extract", Message: "failed to parse result", Err: err}
+	}
+
+	return nil
 }

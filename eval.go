@@ -60,12 +60,11 @@ func (r *EvalResult) String() string {
 	fmt.Fprintf(&b, "evaluation: %d/%d passed, score: %.2f\n", passed, total, r.Score)
 
 	for _, c := range r.Checks {
-		if c.BelowThreshold {
+		switch {
+		case c.BelowThreshold, !c.Pass:
 			fmt.Fprintf(&b, "\n    \u2717 %s\n", c.Expect)
-		} else if c.Pass {
+		default:
 			fmt.Fprintf(&b, "\n    \u2713 %s\n", c.Expect)
-		} else {
-			fmt.Fprintf(&b, "\n    \u2717 %s\n", c.Expect)
 		}
 		fmt.Fprintf(&b, "      reason: %s\n", c.Reason)
 		if c.Evidence != "" {
@@ -150,21 +149,9 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 
 	outputStr := serializeOutput(b.output)
 
-	evalCtx := b.context
-	if b.session.context != "" {
-		if evalCtx != "" {
-			evalCtx = b.session.context + "\n" + evalCtx
-		} else {
-			evalCtx = b.session.context
-		}
-	}
-	userMsg := buildEvalUserMessage(outputStr, b.expectations, evalCtx)
+	userMsg := buildEvalUserMessage(outputStr, b.expectations, mergeContext(b.session.context, b.context))
 
-	timeout := b.timeout
-	if !b.timeoutSet {
-		timeout = b.session.timeout
-	}
-	if timeout > 0 {
+	if timeout := resolveTimeout(b.timeout, b.timeoutSet, b.session.timeout); timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -201,27 +188,11 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 		result.Usage = *usage
 	}
 
-	// Apply confidence threshold.
 	threshold := b.minConfidence
 	if !b.minConfidenceSet {
 		threshold = b.session.minConfidence
 	}
-	if threshold > 0 {
-		allPass := true
-		passCount := 0
-		for i := range result.Checks {
-			if result.Checks[i].Pass && result.Checks[i].Confidence < threshold {
-				result.Checks[i].BelowThreshold = true
-				allPass = false
-			} else if result.Checks[i].Pass {
-				passCount++
-			}
-		}
-		result.Pass = allPass
-		if len(result.Checks) > 0 {
-			result.Score = float64(passCount) / float64(len(result.Checks))
-		}
-	}
+	applyConfidenceThreshold(&result, threshold)
 
 	b.session.emit(Event{
 		Op:       "eval",
@@ -232,4 +203,26 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 	})
 
 	return &result, nil
+}
+
+// applyConfidenceThreshold marks low-confidence passes as below threshold
+// and recalculates Pass/Score accordingly.
+func applyConfidenceThreshold(result *EvalResult, threshold float64) {
+	if threshold <= 0 {
+		return
+	}
+	allPass := true
+	passCount := 0
+	for i := range result.Checks {
+		if result.Checks[i].Pass && result.Checks[i].Confidence < threshold {
+			result.Checks[i].BelowThreshold = true
+			allPass = false
+		} else if result.Checks[i].Pass {
+			passCount++
+		}
+	}
+	result.Pass = allPass
+	if len(result.Checks) > 0 {
+		result.Score = float64(passCount) / float64(len(result.Checks))
+	}
 }

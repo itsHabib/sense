@@ -18,6 +18,6 @@ func Nop() *Session {
 
 type nopCaller struct{}
 
-func (n *nopCaller) call(_ context.Context, req *callRequest) (json.RawMessage, *Usage, error) {
+func (n *nopCaller) call(_ context.Context, _ *callRequest) (json.RawMessage, *Usage, error) {
 	return json.RawMessage("{}"), &Usage{}, nil
 }

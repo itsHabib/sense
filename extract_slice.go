@@ -105,21 +105,9 @@ func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceR
 		return &ExtractSliceResult[T]{Data: []T{}}, nil
 	}
 
-	extCtx := b.context
-	if b.session.context != "" {
-		if extCtx != "" {
-			extCtx = b.session.context + "\n" + extCtx
-		} else {
-			extCtx = b.session.context
-		}
-	}
-	userMsg := buildExtractUserMessage(b.text, extCtx)
+	userMsg := buildExtractUserMessage(b.text, mergeContext(b.session.context, b.context))
 
-	timeout := b.timeout
-	if !b.timeoutSet {
-		timeout = b.session.timeout
-	}
-	if timeout > 0 {
+	if timeout := resolveTimeout(b.timeout, b.timeoutSet, b.session.timeout); timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()

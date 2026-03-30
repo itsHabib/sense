@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const evalSystemPrompt = `You are a strict test evaluator. You will receive output to evaluate and a list of expectations. For each expectation, determine whether the output satisfies it.
@@ -82,6 +83,26 @@ func buildExtractUserMessage(text, context string) string {
 	b.WriteString("Extract the structured data and submit your result.")
 
 	return b.String()
+}
+
+// resolveTimeout returns the per-call timeout if set, otherwise the session timeout.
+func resolveTimeout(callTimeout time.Duration, callSet bool, sessionTimeout time.Duration) time.Duration {
+	if callSet {
+		return callTimeout
+	}
+	return sessionTimeout
+}
+
+// mergeContext combines session-level and per-call context strings.
+func mergeContext(sessionCtx, callCtx string) string {
+	switch {
+	case sessionCtx != "" && callCtx != "":
+		return sessionCtx + "\n" + callCtx
+	case sessionCtx != "":
+		return sessionCtx
+	default:
+		return callCtx
+	}
 }
 
 // serializeOutput converts any output type to a string for the prompt.
