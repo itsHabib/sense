@@ -86,11 +86,16 @@ func buildExtractUserMessage(text, context string) string {
 }
 
 // resolveTimeout returns the per-call timeout if set, otherwise the session timeout.
+// Negative values are clamped to 0 (no timeout).
 func resolveTimeout(callTimeout time.Duration, callSet bool, sessionTimeout time.Duration) time.Duration {
+	t := sessionTimeout
 	if callSet {
-		return callTimeout
+		t = callTimeout
 	}
-	return sessionTimeout
+	if t < 0 {
+		return 0
+	}
+	return t
 }
 
 // mergeContext combines the session-level context with a per-call override.

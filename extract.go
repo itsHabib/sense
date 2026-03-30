@@ -14,6 +14,8 @@ type ExtractResult[T any] struct {
 	Duration   time.Duration `json:"-"`
 	TokensUsed int           `json:"-"`
 	Model      string        `json:"-"`
+	Usage      Usage         `json:"-"`
+	Fallback   bool          `json:"-"`
 }
 
 // ExtractBuilder constructs and executes a structured extraction.
@@ -65,7 +67,8 @@ func (b *ExtractBuilder[T]) Model(model string) *ExtractBuilder[T] {
 	return b
 }
 
-// Timeout overrides the per-call timeout for this extraction. Chainable.
+// Timeout overrides the per-call timeout for this extraction.
+// Set to -1 or 0 to disable timeouts. Chainable.
 func (b *ExtractBuilder[T]) Timeout(d time.Duration) *ExtractBuilder[T] {
 	b.timeout = d
 	b.timeoutSet = true
@@ -93,13 +96,13 @@ func (b *ExtractBuilder[T]) Run() (*ExtractResult[T], error) {
 
 // RunContext executes the extraction with the given context.
 func (b *ExtractBuilder[T]) RunContext(ctx context.Context) (*ExtractResult[T], error) {
-	if b.text == "" {
-		return nil, ErrNoText
-	}
-
 	if shouldSkip() {
 		var zero T
 		return &ExtractResult[T]{Data: zero}, nil
+	}
+
+	if b.text == "" {
+		return nil, ErrNoText
 	}
 
 	userMsg := buildExtractUserMessage(b.text, b.session.mergeContext(b.context))
@@ -132,7 +135,7 @@ func (b *ExtractBuilder[T]) RunContext(ctx context.Context) (*ExtractResult[T], 
 			if fbErr != nil {
 				return nil, &Error{Op: "extract", Message: "fallback failed", Err: fbErr}
 			}
-			return &ExtractResult[T]{Data: *data, Duration: time.Since(start), Model: model}, nil
+			return &ExtractResult[T]{Data: *data, Duration: time.Since(start), Model: model, Fallback: true}, nil
 		}
 		return nil, &Error{Op: "extract", Message: "api call failed", Err: err}
 	}
@@ -148,6 +151,10 @@ func (b *ExtractBuilder[T]) RunContext(ctx context.Context) (*ExtractResult[T], 
 		}
 	}
 
+	if err := checkValidator(&data); err != nil {
+		return nil, &Error{Op: "extract", Message: "validation failed", Err: err}
+	}
+
 	result := &ExtractResult[T]{
 		Data:     data,
 		Duration: time.Since(start),
@@ -155,6 +162,7 @@ func (b *ExtractBuilder[T]) RunContext(ctx context.Context) (*ExtractResult[T], 
 	}
 	if usage != nil {
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
+		result.Usage = *usage
 	}
 
 	b.session.emit(Event{

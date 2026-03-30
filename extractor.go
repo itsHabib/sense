@@ -49,6 +49,18 @@ type Validator interface {
 	Validate() error
 }
 
+// checkValidator checks if v implements Validator (pointer or value receiver)
+// and calls Validate() if so.
+func checkValidator[T any](v *T) error {
+	if val, ok := any(v).(Validator); ok {
+		return val.Validate()
+	}
+	if val, ok := any(*v).(Validator); ok {
+		return val.Validate()
+	}
+	return nil
+}
+
 // ExtractIntoBuilder constructs and executes a structured extraction
 // using the json.Unmarshal pattern. The extracted data is written
 // directly into the dest pointer passed to Extract.
@@ -75,7 +87,8 @@ func (b *ExtractIntoBuilder) Model(model string) *ExtractIntoBuilder {
 	return b
 }
 
-// Timeout overrides the per-call timeout for this extraction. Chainable.
+// Timeout overrides the per-call timeout for this extraction.
+// Set to -1 or 0 to disable timeouts. Chainable.
 func (b *ExtractIntoBuilder) Timeout(d time.Duration) *ExtractIntoBuilder {
 	b.timeout = d
 	b.timeoutSet = true
@@ -98,16 +111,16 @@ func (b *ExtractIntoBuilder) Run() (*ExtractIntoResult, error) {
 // RunContext executes the extraction with the given context.
 // The extracted data is written into the dest pointer passed to Extract.
 func (b *ExtractIntoBuilder) RunContext(ctx context.Context) (*ExtractIntoResult, error) {
+	if shouldSkip() {
+		return &ExtractIntoResult{}, nil
+	}
+
 	if b.text == "" {
 		return nil, ErrNoText
 	}
 
 	if err := validateDest(b.dest); err != nil {
 		return nil, err
-	}
-
-	if shouldSkip() {
-		return &ExtractIntoResult{}, nil
 	}
 
 	schema := schemaForValue(b.dest)
@@ -141,7 +154,7 @@ func (b *ExtractIntoBuilder) RunContext(ctx context.Context) (*ExtractIntoResult
 			if fbErr := b.fallback(); fbErr != nil {
 				return nil, &Error{Op: "extract", Message: "fallback failed", Err: fbErr}
 			}
-			return &ExtractIntoResult{Duration: time.Since(start), Model: model}, nil
+			return &ExtractIntoResult{Duration: time.Since(start), Model: model, Fallback: true}, nil
 		}
 		return nil, &Error{Op: "extract", Message: "api call failed", Err: err}
 	}
@@ -162,6 +175,7 @@ func (b *ExtractIntoBuilder) RunContext(ctx context.Context) (*ExtractIntoResult
 	}
 	if usage != nil {
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
+		result.Usage = *usage
 	}
 
 	b.session.emit(Event{
@@ -181,6 +195,8 @@ type ExtractIntoResult struct {
 	Duration   time.Duration
 	TokensUsed int
 	Model      string
+	Usage      Usage
+	Fallback   bool
 }
 
 // validateDest checks that dest is a non-nil pointer to a struct.

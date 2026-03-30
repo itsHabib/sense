@@ -113,6 +113,7 @@ func (b *EvalBuilder) Model(model string) *EvalBuilder {
 }
 
 // Timeout overrides the per-call timeout for this evaluation.
+// Set to -1 or 0 to disable timeouts.
 func (b *EvalBuilder) Timeout(d time.Duration) *EvalBuilder {
 	b.timeout = d
 	b.timeoutSet = true
@@ -135,16 +136,16 @@ func (b *EvalBuilder) Judge() (*EvalResult, error) {
 
 // JudgeContext executes the evaluation with the given context.
 func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
-	if len(b.expectations) == 0 {
-		return nil, ErrNoExpectations
-	}
-
 	if shouldSkip() {
 		checks := make([]Check, len(b.expectations))
 		for i, exp := range b.expectations {
 			checks[i] = Check{Expect: exp, Pass: true, Confidence: 1.0, Reason: "skipped (SENSE_SKIP=1)"}
 		}
 		return &EvalResult{Pass: true, Score: 1.0, Checks: checks}, nil
+	}
+
+	if len(b.expectations) == 0 {
+		return nil, ErrNoExpectations
 	}
 
 	outputStr := serializeOutput(b.output)
@@ -206,23 +207,22 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 }
 
 // applyConfidenceThreshold marks low-confidence passes as below threshold
-// and recalculates Pass/Score accordingly.
+// and recalculates Pass accordingly. Score is left as Claude returned it —
+// it reflects Claude's raw judgment. Only the top-level Pass is overridden:
+// any below-threshold check fails the eval.
 func applyConfidenceThreshold(result *EvalResult, threshold float64) {
 	if threshold <= 0 {
 		return
 	}
-	allPass := true
-	passCount := 0
 	for i := range result.Checks {
 		if result.Checks[i].Pass && result.Checks[i].Confidence < threshold {
 			result.Checks[i].BelowThreshold = true
-			allPass = false
-		} else if result.Checks[i].Pass {
-			passCount++
 		}
 	}
-	result.Pass = allPass
-	if len(result.Checks) > 0 {
-		result.Score = float64(passCount) / float64(len(result.Checks))
+	for _, c := range result.Checks {
+		if !c.Pass || c.BelowThreshold {
+			result.Pass = false
+			return
+		}
 	}
 }

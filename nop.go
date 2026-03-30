@@ -10,9 +10,25 @@ import (
 //
 //	s := sense.Nop()
 //	s.Extract("text", &dst).Run() // returns immediately, dst is unchanged
-func Nop() *Session {
+//
+// Options are accepted so callers can configure the session if needed:
+//
+//	s := sense.Nop(sense.WithModel("claude-haiku-4-5-20251001"))
+func Nop(opts ...Option) *Session {
+	cfg := &sessionConfig{}
+	for _, o := range opts {
+		o(cfg)
+	}
+	applyDefaults(cfg)
 	return &Session{
-		client: &nopCaller{},
+		client:        &nopCaller{},
+		model:         cfg.model,
+		timeout:       cfg.timeout,
+		maxRetries:    cfg.maxRetries,
+		context:       cfg.context,
+		minConfidence: cfg.minConfidence,
+		logger:        cfg.logger,
+		hook:          cfg.hook,
 	}
 }
 

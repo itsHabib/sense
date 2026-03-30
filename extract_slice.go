@@ -15,6 +15,8 @@ type ExtractSliceResult[T any] struct {
 	Duration   time.Duration `json:"-"`
 	TokensUsed int           `json:"-"`
 	Model      string        `json:"-"`
+	Usage      Usage         `json:"-"`
+	Fallback   bool          `json:"-"`
 }
 
 // ExtractSliceBuilder constructs and executes a structured extraction
@@ -77,7 +79,8 @@ func (b *ExtractSliceBuilder[T]) Validate(fn func(T) error) *ExtractSliceBuilder
 	return b
 }
 
-// Timeout overrides the per-call timeout for this extraction. Chainable.
+// Timeout overrides the per-call timeout for this extraction.
+// Set to -1 or 0 to disable timeouts. Chainable.
 func (b *ExtractSliceBuilder[T]) Timeout(d time.Duration) *ExtractSliceBuilder[T] {
 	b.timeout = d
 	b.timeoutSet = true
@@ -97,12 +100,12 @@ func (b *ExtractSliceBuilder[T]) Run() (*ExtractSliceResult[T], error) {
 
 // RunContext executes the extraction with the given context.
 func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceResult[T], error) {
-	if b.text == "" {
-		return nil, ErrNoText
-	}
-
 	if shouldSkip() {
 		return &ExtractSliceResult[T]{Data: []T{}}, nil
+	}
+
+	if b.text == "" {
+		return nil, ErrNoText
 	}
 
 	userMsg := buildExtractUserMessage(b.text, b.session.mergeContext(b.context))
@@ -135,7 +138,7 @@ func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceR
 			if fbErr != nil {
 				return nil, &Error{Op: "extract_slice", Message: "fallback failed", Err: fbErr}
 			}
-			return &ExtractSliceResult[T]{Data: data, Duration: time.Since(start), Model: model}, nil
+			return &ExtractSliceResult[T]{Data: data, Duration: time.Since(start), Model: model, Fallback: true}, nil
 		}
 		return nil, &Error{Op: "extract_slice", Message: "api call failed", Err: err}
 	}
@@ -158,6 +161,7 @@ func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceR
 	}
 	if usage != nil {
 		result.TokensUsed = usage.InputTokens + usage.OutputTokens
+		result.Usage = *usage
 	}
 
 	b.session.emit(Event{
@@ -172,12 +176,18 @@ func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceR
 }
 
 func (b *ExtractSliceBuilder[T]) validateItems(items []T) error {
-	if b.validate == nil {
-		return nil
-	}
-
 	for i, item := range items {
-		if err := b.validate(item); err != nil {
+		if b.validate != nil {
+			if err := b.validate(item); err != nil {
+				return &Error{
+					Op:      "extract_slice",
+					Message: fmt.Sprintf("validation failed on item %d", i),
+					Err:     err,
+				}
+			}
+		}
+
+		if err := checkValidator(&item); err != nil {
 			return &Error{
 				Op:      "extract_slice",
 				Message: fmt.Sprintf("validation failed on item %d", i),

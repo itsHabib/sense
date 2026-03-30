@@ -38,7 +38,7 @@ func WithModel(model string) Option {
 	}
 }
 
-// WithTimeout sets the per-call timeout. Set to -1 to disable timeouts.
+// WithTimeout sets the per-call timeout. Set to -1 or 0 to disable timeouts.
 func WithTimeout(d time.Duration) Option {
 	return func(c *sessionConfig) {
 		c.timeout = d
@@ -156,7 +156,7 @@ func buildSession(cfg *sessionConfig) *Session {
 	}
 
 	if cfg.cache != nil {
-		c = &cachedCaller{inner: c, cache: cfg.cache}
+		c = &cachedCaller{inner: c, cache: cfg.cache, logger: cfg.logger}
 	}
 
 	s.client = c

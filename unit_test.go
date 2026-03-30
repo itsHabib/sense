@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"testing"
 )
 
@@ -480,8 +481,8 @@ func TestEval_MinConfidence_SessionLevel(t *testing.T) {
 	if result.Checks[1].BelowThreshold {
 		t.Error("expected second check NOT BelowThreshold")
 	}
-	if result.Score != 0.5 {
-		t.Errorf("expected score 0.5, got %.2f", result.Score)
+	if result.Score != 1.0 {
+		t.Errorf("expected score 1.0 (Claude's raw score, unchanged by threshold), got %.2f", result.Score)
 	}
 }
 
@@ -618,6 +619,330 @@ func TestSessionUsage_EstimatedCost(t *testing.T) {
 	}
 }
 
+// --- Fix 1: ExtractResult Usage populated ---
+
+func TestExtract_UsagePopulated(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{"device": "/dev/sdf", "volume_id": "vol-1", "message": "err"}`),
+		usage:    &Usage{InputTokens: 200, OutputTokens: 50},
+	}
+	s := testSession(mock)
+
+	result, err := newExtractBuilder[mountError](s, "text").Run()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Usage.InputTokens != 200 {
+		t.Errorf("expected 200 input tokens, got %d", result.Usage.InputTokens)
+	}
+	if result.Usage.OutputTokens != 50 {
+		t.Errorf("expected 50 output tokens, got %d", result.Usage.OutputTokens)
+	}
+}
+
+func TestExtractInto_UsagePopulated(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{"device": "/dev/sdf", "volume_id": "vol-1", "message": "err"}`),
+		usage:    &Usage{InputTokens: 150, OutputTokens: 40},
+	}
+	s := testSession(mock)
+
+	var m mountError
+	result, err := s.Extract("text", &m).Run()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Usage.InputTokens != 150 {
+		t.Errorf("expected 150 input tokens, got %d", result.Usage.InputTokens)
+	}
+	if result.Usage.OutputTokens != 40 {
+		t.Errorf("expected 40 output tokens, got %d", result.Usage.OutputTokens)
+	}
+}
+
+// --- Fix 2: Validator interface with generic Extract ---
+
+type validatedStruct struct {
+	Name string `json:"name"`
+}
+
+func (v *validatedStruct) Validate() error {
+	if v.Name == "" {
+		return errors.New("name is required")
+	}
+	return nil
+}
+
+func TestExtract_ValidatorInterface(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{"name": ""}`),
+		usage:    &Usage{InputTokens: 50, OutputTokens: 20},
+	}
+	s := testSession(mock)
+
+	_, err := newExtractBuilder[validatedStruct](s, "some text").Run()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	var senseErr *Error
+	if !errors.As(err, &senseErr) {
+		t.Fatalf("expected *sense.Error, got %T", err)
+	}
+	if senseErr.Message != "validation failed" {
+		t.Errorf("expected 'validation failed', got %s", senseErr.Message)
+	}
+}
+
+func TestExtract_ValidatorInterface_Passes(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{"name": "Alice"}`),
+		usage:    &Usage{InputTokens: 50, OutputTokens: 20},
+	}
+	s := testSession(mock)
+
+	result, err := newExtractBuilder[validatedStruct](s, "some text").Run()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Data.Name != "Alice" {
+		t.Errorf("expected Alice, got %s", result.Data.Name)
+	}
+}
+
+func TestExtractSlice_ValidatorInterface(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{"items": [{"name": "ok"}, {"name": ""}]}`),
+		usage:    &Usage{InputTokens: 50, OutputTokens: 20},
+	}
+	s := testSession(mock)
+
+	_, err := newExtractSliceBuilder[validatedStruct](s, "some text").Run()
+	if err == nil {
+		t.Fatal("expected validation error on item 1")
+	}
+	var senseErr *Error
+	if !errors.As(err, &senseErr) {
+		t.Fatalf("expected *sense.Error, got %T", err)
+	}
+}
+
+// --- Fix 3: Fallback result ---
+
+func TestExtract_FallbackMarked(t *testing.T) {
+	mock := &mockCaller{
+		err: errors.New("api down"),
+	}
+	s := testSession(mock)
+
+	result, err := newExtractBuilder[mountError](s, "text").
+		Fallback(func() (*mountError, error) {
+			return &mountError{Device: "fallback"}, nil
+		}).
+		Run()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Fallback {
+		t.Error("expected Fallback=true")
+	}
+	if result.Data.Device != "fallback" {
+		t.Errorf("expected 'fallback', got %s", result.Data.Device)
+	}
+}
+
+func TestExtractInto_FallbackMarked(t *testing.T) {
+	mock := &mockCaller{
+		err: errors.New("api down"),
+	}
+	s := testSession(mock)
+
+	var m mountError
+	result, err := s.Extract("text", &m).
+		Fallback(func() error {
+			m.Device = "fallback"
+			return nil
+		}).
+		Run()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Fallback {
+		t.Error("expected Fallback=true")
+	}
+}
+
+func TestExtractSlice_FallbackMarked(t *testing.T) {
+	mock := &mockCaller{
+		err: errors.New("api down"),
+	}
+	s := testSession(mock)
+
+	result, err := newExtractSliceBuilder[mountError](s, "text").
+		Fallback(func() ([]mountError, error) {
+			return []mountError{{Device: "fb"}}, nil
+		}).
+		Run()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Fallback {
+		t.Error("expected Fallback=true")
+	}
+}
+
+// --- Fix 4: Timeout clamping ---
+
+func TestResolveTimeout_NegativeClamped(t *testing.T) {
+	got := resolveTimeout(-1, true, 30)
+	if got != 0 {
+		t.Errorf("expected 0, got %v", got)
+	}
+}
+
+func TestResolveTimeout_SessionNegativeClamped(t *testing.T) {
+	got := resolveTimeout(0, false, -5)
+	if got != 0 {
+		t.Errorf("expected 0, got %v", got)
+	}
+}
+
+func TestResolveTimeout_PositivePassthrough(t *testing.T) {
+	got := resolveTimeout(10, true, 30)
+	if got != 10 {
+		t.Errorf("expected 10, got %v", got)
+	}
+}
+
+// --- Fix 5: SENSE_SKIP before validation ---
+
+func TestSENSE_SKIP_EmptyText(t *testing.T) {
+	t.Setenv("SENSE_SKIP", "1")
+
+	s := testSession(&mockCaller{})
+
+	// Extract with empty text — should skip, not error.
+	result, err := newExtractBuilder[mountError](s, "").Run()
+	if err != nil {
+		t.Fatalf("expected skip, got error: %v", err)
+	}
+	_ = result
+
+	// ExtractInto with empty text.
+	var m mountError
+	intoResult, err := s.Extract("", &m).Run()
+	if err != nil {
+		t.Fatalf("expected skip, got error: %v", err)
+	}
+	_ = intoResult
+
+	// Eval with no expectations.
+	evalResult, err := s.Eval("test").Judge()
+	if err != nil {
+		t.Fatalf("expected skip, got error: %v", err)
+	}
+	if !evalResult.Pass {
+		t.Error("expected skip result to pass")
+	}
+
+	// Compare with no criteria.
+	compResult, err := s.Compare("a", "b").Judge()
+	if err != nil {
+		t.Fatalf("expected skip, got error: %v", err)
+	}
+	if compResult.Winner != "tie" {
+		t.Errorf("expected tie, got %s", compResult.Winner)
+	}
+}
+
+// --- Fix 6: Nop with options ---
+
+func TestNop_WithOptions(t *testing.T) {
+	s := Nop(WithModel("claude-opus-4-6"))
+	if s.model != "claude-opus-4-6" {
+		t.Errorf("expected claude-opus-4-6, got %s", s.model)
+	}
+	if s.client == nil {
+		t.Error("expected non-nil nop client")
+	}
+
+	// Still works as no-op.
+	var m mountError
+	_, err := s.Extract("text", &m).Run()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNop_ZeroConfig(t *testing.T) {
+	s := Nop()
+	if s.model != "claude-sonnet-4-6" {
+		t.Errorf("expected default model, got %s", s.model)
+	}
+}
+
+// --- Fix 7: Score unchanged by threshold ---
+
+func TestConfidenceThreshold_ScoreUnchanged(t *testing.T) {
+	result := &EvalResult{
+		Pass:  true,
+		Score: 0.8, // Claude's raw score
+		Checks: []Check{
+			{Expect: "a", Pass: true, Confidence: 0.3, Reason: "low"},
+			{Expect: "b", Pass: true, Confidence: 0.9, Reason: "high"},
+		},
+	}
+
+	applyConfidenceThreshold(result, 0.7)
+
+	if result.Score != 0.8 {
+		t.Errorf("expected score 0.8 (unchanged), got %.2f", result.Score)
+	}
+	if result.Pass {
+		t.Error("expected pass=false — first check is below threshold")
+	}
+	if !result.Checks[0].BelowThreshold {
+		t.Error("expected first check BelowThreshold=true")
+	}
+	if result.Checks[1].BelowThreshold {
+		t.Error("expected second check BelowThreshold=false")
+	}
+}
+
+// --- Fix 8: Cache errors logged ---
+
+func TestCachedCaller_CorruptCacheLogged(t *testing.T) {
+	mock := &mockCaller{
+		response: json.RawMessage(`{"ok": true}`),
+		usage:    &Usage{InputTokens: 10, OutputTokens: 5},
+	}
+
+	cache := MemoryCache()
+	// Plant corrupt data in cache.
+	req := &callRequest{systemPrompt: "sys", userMessage: "msg", toolName: "t", model: "m"}
+	key := cacheKey(req)
+	cache.Set(key, []byte("not valid json"))
+
+	var logged bool
+	logger := captureLogger(&logged)
+
+	cc := &cachedCaller{inner: mock, cache: cache, logger: logger}
+
+	// Should fall through to inner, log the error.
+	raw, _, err := cc.call(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(raw) != `{"ok": true}` {
+		t.Errorf("unexpected response: %s", raw)
+	}
+	if mock.calls != 1 {
+		t.Errorf("expected fallthrough to inner, got %d calls", mock.calls)
+	}
+	if !logged {
+		t.Error("expected cache error to be logged")
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
@@ -630,3 +955,17 @@ func searchString(s, substr string) bool {
 	}
 	return false
 }
+
+// captureLogger returns a logger that sets *logged to true on any log call.
+func captureLogger(logged *bool) *slog.Logger {
+	return slog.New(&flagHandler{logged: logged})
+}
+
+type flagHandler struct {
+	logged *bool
+}
+
+func (h *flagHandler) Enabled(_ context.Context, _ slog.Level) bool  { return true }
+func (h *flagHandler) Handle(_ context.Context, _ slog.Record) error { *h.logged = true; return nil } //nolint:gocritic // test helper
+func (h *flagHandler) WithAttrs(_ []slog.Attr) slog.Handler          { return h }
+func (h *flagHandler) WithGroup(_ string) slog.Handler               { return h }

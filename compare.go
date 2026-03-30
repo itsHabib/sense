@@ -74,6 +74,7 @@ func (b *CompareBuilder) Model(model string) *CompareBuilder {
 }
 
 // Timeout overrides the per-call timeout for this comparison.
+// Set to -1 or 0 to disable timeouts.
 func (b *CompareBuilder) Timeout(d time.Duration) *CompareBuilder {
 	b.timeout = d
 	b.timeoutSet = true
@@ -87,12 +88,12 @@ func (b *CompareBuilder) Judge() (*CompareResult, error) {
 
 // JudgeContext executes the comparison with the given context.
 func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, error) {
-	if len(b.criteria) == 0 {
-		return nil, ErrNoCriteria
-	}
-
 	if shouldSkip() {
 		return &CompareResult{Winner: "tie", ScoreA: 0.5, ScoreB: 0.5, Reasoning: "skipped (SENSE_SKIP=1)"}, nil
+	}
+
+	if len(b.criteria) == 0 {
+		return nil, ErrNoCriteria
 	}
 
 	outputA := serializeOutput(b.outputA)

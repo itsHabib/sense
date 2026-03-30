@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"sync"
 )
 
@@ -45,8 +46,9 @@ func (c *memoryCache) Set(key string, data []byte) {
 // call is skipped entirely. On miss, the response is stored after a
 // successful call.
 type cachedCaller struct {
-	inner caller
-	cache Cache
+	inner  caller
+	cache  Cache
+	logger *slog.Logger
 }
 
 // cacheEntry is the serialized form stored in the cache.
@@ -62,6 +64,8 @@ func (c *cachedCaller) call(ctx context.Context, req *callRequest) (json.RawMess
 		var entry cacheEntry
 		if err := json.Unmarshal(data, &entry); err == nil {
 			return entry.Raw, entry.Usage, nil
+		} else if c.logger != nil {
+			c.logger.Warn("sense: corrupt cache entry", "error", err)
 		}
 	}
 
@@ -73,6 +77,8 @@ func (c *cachedCaller) call(ctx context.Context, req *callRequest) (json.RawMess
 	entry := cacheEntry{Raw: raw, Usage: usage}
 	if data, err := json.Marshal(entry); err == nil {
 		c.cache.Set(key, data)
+	} else if c.logger != nil {
+		c.logger.Warn("sense: cache write failed", "error", err)
 	}
 
 	return raw, usage, nil
