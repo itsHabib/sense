@@ -149,7 +149,7 @@ func (b *EvalBuilder) JudgeContext(ctx context.Context) (*EvalResult, error) {
 
 	outputStr := serializeOutput(b.output)
 
-	userMsg := buildEvalUserMessage(outputStr, b.expectations, mergeContext(b.session.context, b.context))
+	userMsg := buildEvalUserMessage(outputStr, b.expectations, b.session.mergeContext(b.context))
 
 	if timeout := resolveTimeout(b.timeout, b.timeoutSet, b.session.timeout); timeout > 0 {
 		var cancel context.CancelFunc

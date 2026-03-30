@@ -59,7 +59,7 @@ func (s *Session) runExtractJob(ctx context.Context, j ExtractJob) error {
 	}
 
 	schema := schemaForValue(j.Dest)
-	userMsg := buildExtractUserMessage(j.Text, mergeContext(s.context, j.Context))
+	userMsg := buildExtractUserMessage(j.Text, s.mergeContext(j.Context))
 
 	model := j.Model
 	if model == "" {

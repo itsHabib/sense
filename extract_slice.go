@@ -105,7 +105,7 @@ func (b *ExtractSliceBuilder[T]) RunContext(ctx context.Context) (*ExtractSliceR
 		return &ExtractSliceResult[T]{Data: []T{}}, nil
 	}
 
-	userMsg := buildExtractUserMessage(b.text, mergeContext(b.session.context, b.context))
+	userMsg := buildExtractUserMessage(b.text, b.session.mergeContext(b.context))
 
 	if timeout := resolveTimeout(b.timeout, b.timeoutSet, b.session.timeout); timeout > 0 {
 		var cancel context.CancelFunc

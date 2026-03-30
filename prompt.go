@@ -93,13 +93,13 @@ func resolveTimeout(callTimeout time.Duration, callSet bool, sessionTimeout time
 	return sessionTimeout
 }
 
-// mergeContext combines session-level and per-call context strings.
-func mergeContext(sessionCtx, callCtx string) string {
+// mergeContext combines the session-level context with a per-call override.
+func (s *Session) mergeContext(callCtx string) string {
 	switch {
-	case sessionCtx != "" && callCtx != "":
-		return sessionCtx + "\n" + callCtx
-	case sessionCtx != "":
-		return sessionCtx
+	case s.context != "" && callCtx != "":
+		return s.context + "\n" + callCtx
+	case s.context != "":
+		return s.context
 	default:
 		return callCtx
 	}

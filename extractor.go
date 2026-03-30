@@ -112,7 +112,7 @@ func (b *ExtractIntoBuilder) RunContext(ctx context.Context) (*ExtractIntoResult
 
 	schema := schemaForValue(b.dest)
 
-	userMsg := buildExtractUserMessage(b.text, mergeContext(b.session.context, b.context))
+	userMsg := buildExtractUserMessage(b.text, b.session.mergeContext(b.context))
 
 	if timeout := resolveTimeout(b.timeout, b.timeoutSet, b.session.timeout); timeout > 0 {
 		var cancel context.CancelFunc

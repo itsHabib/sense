@@ -98,7 +98,7 @@ func (b *CompareBuilder) JudgeContext(ctx context.Context) (*CompareResult, erro
 	outputA := serializeOutput(b.outputA)
 	outputB := serializeOutput(b.outputB)
 
-	userMsg := buildCompareUserMessage(outputA, outputB, b.criteria, mergeContext(b.session.context, b.context))
+	userMsg := buildCompareUserMessage(outputA, outputB, b.criteria, b.session.mergeContext(b.context))
 
 	if timeout := resolveTimeout(b.timeout, b.timeoutSet, b.session.timeout); timeout > 0 {
 		var cancel context.CancelFunc
