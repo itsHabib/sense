@@ -19,8 +19,20 @@ fmt.Println(m.VolumeID) // "vol-0abc123"
 
 Sense uses the [Anthropic API](https://docs.anthropic.com/en/docs) (Claude) with forced `tool_use` for structured responses — no prompt engineering, no JSON parsing on your end. Requires an Anthropic API key.
 
+Two surfaces, one package:
+
 - **Extract** — parse unstructured text into typed Go structs. Logs, error messages, support tickets, API responses — define a struct, get structured data back.
-- **Judge** — evaluate non-deterministic output against expectations. Assert in tests, eval programmatically, or A/B compare two outputs.
+- **Judge** — evaluate non-deterministic output against natural-language expectations. Assert in tests (`Assert`/`Require`), eval programmatically (`Eval`), or A/B compare two outputs (`Compare`).
+
+## Why it exists
+
+Go programs that touch LLM output have two recurring problems: turning messy text into something typed, and asserting that non-deterministic output is *good* without a brittle string match. Sense does exactly those two things behind one seam — a `caller` that forces Claude to call a single tool whose schema is the output contract. Everything else is a thin builder in front of that seam.
+
+Scope is deliberately narrow:
+
+- **It judges and extracts. It is not an agent framework.** No tool-calling loops, no chains, no orchestration — Sense makes a single forced-tool call and unmarshals the result.
+- **It speaks Claude only, today.** The `caller` interface is abstracted so a second provider is ~100 lines, but no OpenAI/other caller is shipped. An OpenAI caller and `WithCaller` injection live in [docs/NEXT.md](docs/NEXT.md), not in the code.
+- **Eval-framework features are roadmap, not core.** Deterministic `Check()`s, snapshots/regression detection, dataset runners, multi-judge consensus, JUnit/GitHub-Actions reporters, file cache, and a cost budget are designed in [docs/NEXT.md](docs/NEXT.md) and **not** built. What's listed under "Surfaces" below is what exists.
 
 ## Install
 
@@ -31,6 +43,22 @@ go get github.com/itsHabib/sense
 ```bash
 export ANTHROPIC_API_KEY=...
 ```
+
+Requires Go 1.25+.
+
+## Surfaces
+
+| Function | What it does | Returns |
+|---|---|---|
+| `Extract[T](text)` / `s.Extract(text, &dst)` | One typed struct from text (generic, or `json.Unmarshal`-style into a pointer) | `*ExtractResult[T]` / `(*ExtractResult, error)` |
+| `ExtractSlice[T](text)` | A `[]T` from one text — invoices, log batches, entity lists | `*ExtractSliceResult[T]` |
+| `s.ExtractParallel(ctx, jobs)` | Run N extractions concurrently, results written into each job's `Dest` | `*ExtractParallelResult` |
+| `Assert(t, output)` | Test assertion, `t.Error` on failure (test continues) | — |
+| `Require(t, output)` | Test assertion, `t.Fatal` on failure (test stops) | — |
+| `Eval(output)` | Programmatic evaluation you inspect yourself | `*EvalResult` |
+| `Compare(a, b)` | A/B comparison of two outputs against the same criteria | `*CompareResult` |
+
+Each is a chainable builder ending in a terminal (`Run()` / `Judge()`). Package-level forms (`sense.Eval`, `sense.Extract[T]`, …) use a lazy default session; the `s.*` forms run on a session you configured with `New`/`ForTest`.
 
 ## Extract — structure from chaos
 
@@ -65,6 +93,8 @@ result, err := sense.Extract[MountError]("device /dev/sdf already mounted with v
 fmt.Println(result.Data.Device)   // "/dev/sdf"
 ```
 
+`ExtractResult[T]` carries `Data`, `Duration`, `TokensUsed`, `Model`, `Usage`, and `Fallback`.
+
 ### ExtractSlice — multiple items from one text
 
 Extract a list of typed structs from a single input. Same API as `Extract`, returns `[]T`:
@@ -98,6 +128,28 @@ result, err := sense.ExtractSlice[LineItem](text).
         return nil
     }).
     Run()
+```
+
+### ExtractParallel — many extractions at once
+
+Run a batch of independent extractions concurrently. Each job writes into its own destination pointer; the result reports per-job errors and total wall-clock time:
+
+```go
+var mount MountError
+var ticket TicketInfo
+
+res := s.ExtractParallel(ctx, []sense.ExtractJob{
+    {Text: logLine, Dest: &mount, Context: "AWS EBS error"},
+    {Text: emailBody, Dest: &ticket, Context: "support email"},
+})
+
+if res.Failed() {
+    for i, err := range res.Errors {
+        if err != nil {
+            log.Printf("job %d failed: %v", i, err)
+        }
+    }
+}
 ```
 
 ### Validation
@@ -238,6 +290,20 @@ for _, c := range result.FailedChecks() {
 }
 ```
 
+`EvalResult` exposes `Pass`, `Score`, `Checks`, and helpers `PassedChecks()` / `FailedChecks()`. Each `Check` carries `Expect`, `Pass`, `Confidence`, `Reason`, `Evidence`, and `BelowThreshold`.
+
+### Confidence threshold
+
+A check can pass Claude's judgment but with low confidence. Set a minimum and low-confidence passes are demoted to failures (flagged `BelowThreshold`):
+
+```go
+// Per call
+sense.Eval(output).Expect("is factually accurate").MinConfidence(0.8).Judge()
+
+// Or session-wide
+s := sense.New(sense.WithMinConfidence(0.8))
+```
+
 ### Compare — A/B test two outputs
 
 ```go
@@ -286,10 +352,14 @@ result, err := sense.Extract[MountError](logLine).Run()
 ```go
 s := sense.New(
     sense.WithModel("claude-haiku-4-5-20251001"),
-    sense.WithTimeout(10 * time.Second),
-    sense.WithRetries(5),
+    sense.WithTimeout(10 * time.Second),  // -1 or 0 disables the timeout
+    sense.WithRetries(5),                 // -1 disables retries
     sense.WithAPIKey("sk-..."),
-    sense.WithMemoryCache(),
+    sense.WithMemoryCache(),              // in-memory response cache, lives with the session
+    sense.WithMinConfidence(0.8),         // demote low-confidence passes to failures
+    sense.WithContext("you are reviewing API docs"), // prepended to every call
+    sense.WithLogger(slog.Default()),     // log calls, latencies, tokens, errors
+    sense.WithHook(func(e sense.Event) { /* per-call callback */ }),
 )
 ```
 
@@ -308,10 +378,10 @@ s := sense.ForTest(t, sense.WithModel("claude-haiku-4-5-20251001"))  // custom
 s := sense.New()
 // ... run evaluations ...
 fmt.Println(s.Usage())
-// sense: 15 calls, 18420 input tokens, 4210 output tokens
+// sense: 15 calls, 18420 input tokens, 4210 output tokens (~$0.0612)
 ```
 
-Token usage is tracked across all operations using atomic counters — safe for concurrent use.
+Token usage is tracked across all operations using atomic counters — safe for concurrent use. `Usage()` returns a `SessionUsage` snapshot with an estimated cost from the built-in per-model pricing table (Sonnet / Haiku / Opus).
 
 ## Batching
 
@@ -323,36 +393,6 @@ defer s.Close() // required — flushes pending batch requests
 ```
 
 **Note:** Batching trades latency for cost. The Batch API processes requests asynchronously — it can take minutes to hours depending on load. Use it for large test suites where 50% cost savings matter more than speed.
-
-## Running Tests
-
-Unit tests use a mock caller and don't hit the API:
-
-```bash
-go test ./...
-```
-
-E2e tests hit the real Claude API and **cost money** (~$0.10-0.15 per full suite run):
-
-```bash
-ANTHROPIC_API_KEY=... go test -tags=e2e -v ./...
-```
-
-### Offline Development
-
-Skip all sense calls when you don't have an API key:
-
-```bash
-SENSE_SKIP=1 go test ./...
-```
-
-All `Assert`, `Require`, `Eval`, `Extract`, `ExtractSlice`, and `Compare` calls become no-ops that pass immediately.
-
-`sense.Nop()` also accepts options for cases where you want a no-op session with specific configuration (e.g., model name in result metadata, logging):
-
-```go
-s := sense.Nop(sense.WithModel("claude-haiku-4-5-20251001"), sense.WithLogger(logger))
-```
 
 ## Interfaces
 
@@ -380,33 +420,110 @@ func ParseTicket(s sense.Extractor, raw string) (*Ticket, error) {
 
 `*Session` satisfies both interfaces. Accept `Evaluator` or `Extractor` in your function signatures to make your code testable without the Claude API.
 
-## Environment Variables
+## Architecture
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Claude API key | Required |
-| `SENSE_MODEL` | Override default judge model | `claude-sonnet-4-6` |
-| `SENSE_SKIP` | Set to `1` to skip all sense calls | unset |
+Single flat package — no `cmd/`, no sub-packages. Everything pivots on one seam: the `caller` interface (`call(ctx, *callRequest)`). Builders sit in front of it; transports/decorators sit behind it.
 
-## How It Works
+```
+  Extract[T] / ExtractSlice[T] / ExtractParallel   Assert / Require / Eval / Compare
+        (extract builders)                              (judge builders)
+                    \                                       /
+                     \                                     /
+                      ▼                                   ▼
+                   ┌─────────────────────────────────────────┐
+                   │  Session  — model, timeout, retries,     │
+                   │  usage counters, optional cache/batcher  │
+                   └─────────────────────────────────────────┘
+                                      │
+                              caller.call(...)         ← the one seam
+                                      │
+        ┌──────────────┬──────────────┴───────┬───────────────┐
+        ▼              ▼                       ▼               ▼
+   claudeClient   batchCaller            cachedCaller     nopCaller
+   (real API,     (Anthropic Batch       (decorator,      (Nop(): {})
+    retries,       API, 50% cost)         memory cache)
+    forced tool,
+    prompt cache)
+```
+
+| Component | File | Role |
+|---|---|---|
+| `caller` | `client.go` | One-method seam every operation calls |
+| `claudeClient` | `client.go` | Real API call — forces one tool via `tool_choice`, retries 429/5xx with backoff, ephemeral prompt cache on the system block |
+| `batchCaller` + `batcher` | `batch.go` | Routes calls through the Batch API (50% cost); needs `Close()` to flush |
+| `cachedCaller` | `cache.go` | Decorator over any caller; content-addressed in-memory cache |
+| `nopCaller` | `nop.go` | Returns `{}`; backs `sense.Nop()` for offline runs |
+| Extract schema gen | `extract_schema.go` | Reflects a struct into a tool input schema, cached per `reflect.Type` |
+| `Session` | `config.go`, `option.go` | Holds config + atomic usage counters; built via functional options |
+
+### How it works
 
 1. Your struct schema (Extract) or expectations (Judge) become a prompt
 2. Claude is forced to call a structured tool via `tool_choice`
 3. The tool's input schema enforces the output format server-side
 4. Sense unmarshals the tool call result into typed Go structs
 
-No prompt engineering. No JSON parsing. No "hope the model returns valid output." The schema is enforced server-side.
+The schema is enforced server-side, so there's no output parsing on your end. The system prompt carries an ephemeral `cache_control` block, so repeated calls within a session pay reduced input cost on the cached prefix.
 
-## What's Next
+## Develop
+
+```bash
+go test ./...                       # unit tests — mock caller, no API, no key needed
+go test -tags=e2e -v ./...          # e2e — hits the real API, COSTS money (~$0.10–0.15/run)
+SENSE_SKIP=1 go test ./...          # offline — every sense call becomes a passing no-op
+go tool golangci-lint run           # lint (golangci-lint v2 pinned as a go.mod tool dependency)
+go build ./...
+```
+
+Unit tests inject a mock `caller` and never touch the network; e2e tests live behind the `//go:build e2e` tag in `e2e_test.go`. House style is Dave Cheney's and is enforced, not aspirational — see [.golangci.yml](.golangci.yml) (`revive` indent-error-flow / superfluous-else, `nestif`, `gocyclo` 15, `funlen` 80 lines).
+
+### Offline development
+
+Skip all sense calls when you don't have an API key:
+
+```bash
+SENSE_SKIP=1 go test ./...
+```
+
+All `Assert`, `Require`, `Eval`, `Extract`, `ExtractSlice`, and `Compare` calls become no-ops that pass immediately.
+
+`sense.Nop()` also accepts options for cases where you want a no-op session with specific configuration (e.g., model name in result metadata, logging):
+
+```go
+s := sense.Nop(sense.WithModel("claude-haiku-4-5-20251001"), sense.WithLogger(logger))
+```
+
+## Environment variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ANTHROPIC_API_KEY` | Claude API key | Required (real usage + e2e only) |
+| `SENSE_MODEL` | Override default judge model | `claude-sonnet-4-6` |
+| `SENSE_SKIP` | Set to `1` to skip all sense calls | unset |
+
+Model precedence: per-call `.Model()` > `$SENSE_MODEL` > session model.
+
+## Docs
+
+| Doc | What's in it |
+|---|---|
+| [docs/NEXT.md](docs/NEXT.md) | Feature backlog — what's shipped vs. designed-but-unbuilt |
+| [docs/CONFIDENCE-THRESHOLD.md](docs/CONFIDENCE-THRESHOLD.md) | Confidence-threshold design |
+| [docs/FOOTGUNS.md](docs/FOOTGUNS.md) | API footguns and the fixes applied |
+| [docs/API-SIMPLIFICATION.md](docs/API-SIMPLIFICATION.md) | API-simplification history |
+| [docs/MULTI-JUDGE-CONSENSUS.md](docs/MULTI-JUDGE-CONSENSUS.md) | Multi-judge consensus design (unbuilt) |
+| [docs/INTEGRATION-FEEDBACK.md](docs/INTEGRATION-FEEDBACK.md) | Notes from production usage |
+
+## What's next
+
+Roadmap — designed in [docs/NEXT.md](docs/NEXT.md), not yet built. Ideas, not commitments.
 
 - [ ] **Deterministic checks** — mix `Check(sense.ValidJSON())` with LLM-judged `Expect()` in the same assertion. Deterministic checks run first; if any fail, skip the LLM call. Free, fast, saves money.
-- [x] **Extract validation** — `Validate(func(T) error)` and `Validator` interface on all extract paths.
-- [ ] **File cache** — cache responses to disk. Identical prompts during iterative development hit the cache instead of the API.
-- [ ] **Prompt caching** — use Anthropic's `cache_control` to reduce cost on repeated system prompts within a session.
+- [ ] **File cache** — cache responses to disk. Identical prompts during iterative development hit the cache instead of the API. (Today only `WithMemoryCache()` exists.)
 - [ ] **Snapshots** — save eval results to disk, detect regressions when prompts change. `SENSE_UPDATE_SNAPSHOTS=1` to update.
 - [ ] **CI reporter** — JUnit XML output and GitHub Actions annotations so eval results show up in your pipeline.
 - [ ] **Multi-judge consensus** — fan out to N models, require agreement for a pass. Reduces false positives from single-model bias.
-- [x] **ExtractSlice[T]** — extract `[]T` from text with multiple items (invoices, log batches, entity lists).
-- [ ] **Cost budget** — `MaxCost: sense.Dollars(0.50)` to cap session spend. Prevents runaway costs in CI.
+- [ ] **Cost budget** — `WithMaxCost(sense.Dollars(0.50))` to cap session spend. Prevents runaway costs in CI.
+- [ ] **Multi-model judges** — an OpenAI `caller` + `WithCaller` injection, to judge with non-Claude models.
 
-These are ideas, not commitments. See [docs/NEXT.md](docs/NEXT.md) for details.
+Already shipped: extract validation (`Validate` + `Validator`), `ExtractSlice[T]`, `ExtractParallel`, confidence thresholds, in-memory cache, batching, and Anthropic prompt caching on system prompts.
