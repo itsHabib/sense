@@ -23,7 +23,7 @@ go build ./...
 <!-- BEGIN dev-workbench (managed by /dev-workbench skill — re-run to refresh; hand-edits inside this block will be overwritten) -->
 ## Dev workbench
 
-Several MCP servers + skills are available in any Claude session on this machine — the dev-workflow infrastructure built across the portfolio: dossier (project memory), ship (workflow execution), huddle (multi-seat coordination), playwright (browser automation), plus the `/work-driver` family and the `/worktree-*` skills. When the signal matches, **just call the verb**. Don't ask permission.
+Several MCP servers + skills are available in any Claude session on this machine — the dev-workflow infrastructure built across the portfolio: dossier (project memory), ship (workflow execution), huddle (multi-seat coordination), playwright (browser automation), plus the `/work-driver` family and the `/worktree-*` skills. When the signal matches, **just call the verb**. Don't ask permission. Stuck on a *knowledge* question about another portfolio repo — how it behaves, its conventions, what's in flight there — `/consult` its steward instead of asking the operator; only *authority* questions (direction, spend, irreversible calls) go to the operator.
 
 ### dossier — project memory
 
@@ -121,6 +121,13 @@ Four sections — What happened / What's next / What I recommend / What I need f
 **Triggers:** "give me an update", "where are we", "sitrep", "recap", explicit `/status`.
 **Pair with:** `/shipped` once the work actually lands.
 
+### `/consult` — summon a sibling repo's steward
+
+Summons a sibling repo's steward (an ephemeral subagent scoped to that repo) for a same-turn answer; knowledge questions go to a peer, authority questions to the operator. Read-only — it answers, it doesn't act.
+
+**Triggers:** "ask the `<repo>` agent", "what does the `<repo>` steward think", stuck on how another portfolio repo behaves, explicit `/consult <repo> "<question>"`.
+**Pair with:** the stuck-path escalation before pinging the operator mid-task or mid-`/work-driver`.
+
 ### `/worktree-*` — manage secondary git worktrees
 
 Thin skill family over plain `git worktree`. Use these instead of reaching for an MCP — they cover the verbs that mattered (add, list, remove, transfer, where) without an external state store.
@@ -144,7 +151,7 @@ dossier task ──▶ /worktree-add ──▶ ship run ──▶ PR ──▶ r
 
 ### Why this shape
 
-Each layer is independently swappable. dossier could be Linear; the `/worktree-*` skills could be hand-rolled `git worktree` calls; ship could be a different agent runner; huddle could be any chat transport. The seams are deliberate — planning (dossier), isolation (worktree-\*), execution (ship), and coordination (huddle) don't reach into each other, so substituting one doesn't ripple into the rest. The skills are compositions over these mechanisms, not new state stores.
+Each layer is independently swappable. dossier could be Linear; the `/worktree-*` skills could be hand-rolled `git worktree` calls; ship could be a different agent runner; huddle could be any chat transport. The seams are deliberate — planning (dossier), isolation (worktree-\*), execution (ship), and coordination (huddle) don't reach into each other, so substituting one doesn't ripple into the rest; `/consult` owns the stuck path (peer knowledge before operator attention). The skills are compositions over these mechanisms, not new state stores.
 <!-- END dev-workbench -->
 
 ## Architecture
